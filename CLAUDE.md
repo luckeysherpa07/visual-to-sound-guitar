@@ -84,6 +84,7 @@ Secondary references for fretboard tracking:
 | GuiFiR for the warp step | Nov 13 | Provides a dense fretboard grid; dataset is public. |
 | Train the fretboard estimator ourselves, not rely on released weights | Nov 16 | **Tentative**, still being considered. |
 | Drop the velocity head | Nov 11 | GAPS velocities are not real. |
+| Python 3.11 + PyTorch | Nov 16 | All reference code (V2N, GuiFiR, GAPS) and needed libraries (OpenCV, pretty_midi, mir_eval) are Python. |
 | Evaluate only on real MIDI | Nov 13 | Pseudo-labels (magcil) would make test numbers meaningless. |
 
 ## Evaluation

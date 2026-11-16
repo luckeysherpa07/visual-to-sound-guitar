@@ -18,6 +18,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest", "jupyter"]
+# GuiFiR dataset download (gdown archive, yt-dlp clips)
+data = ["gdown", "yt-dlp"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

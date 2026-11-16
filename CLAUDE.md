@@ -2,7 +2,7 @@
 
 Master's thesis (Computer Science, JMU Würzburg). Author: Ruluckey "Luckey" Sherpa. Supervisor: Zongwei Wu.
 **Hard deadline: Feb 1, 2027. Experiment freeze: Jan 6, 2027.**
-Status as of 2026-11-16: planning done, no code yet. Update this file when decisions change.
+Status as of 2026-11-16: project structure set up; fretboard pose estimator (FPE) code written and verified end to end on generated fake fretboards only. No real data downloaded or annotated yet. Update this file when decisions change.
 
 ## Goal
 
@@ -25,7 +25,14 @@ video ─► fretboard landmarks ─► homography ─► temporal smoothing ─
 
 ### Stage 1: fretboard preprocessing (current focus)
 
-1. **Landmark detection per frame.** Method: GuiFiR-style fretboard estimator (GuiFiR predicts a 126-landmark fretboard grid plus hand pose; its dataset is public).
+1. **Landmark detection per frame.** Method: GuiFiR fretboard pose estimator (FPE) only, no hand pose / TabCNN / joint fine-tuning.
+   - Model (GuiFiR §IV-A.2): MMPose top-down regression, ResNet-50 (ImageNet init) → global average pooling → linear → 126 (x, y). Input = fretboard box + 10% padding, 256×256 crop.
+   - 126 points = 6 strings × (nut + 20 frets); index `string * 21 + fret`, string 0 = high E, fret 0 = nut. Labels are physical, so horizontal flip uses identity flip indices.
+   - Loss: smooth L1 with per-point weights: corners 1/4, 46 edge points 1/46, 76 internal 1/76.
+   - Labels: the public GuiFiR release is GuiFiR-Vid only (clips, tablature, detector neck boxes; 4 corners `lt/lb/rt/rb` only on val 543 / test 2,048 frames, in 640×360 coords). **GuiFiR-Synth (126-point labels) is not released.** So we click 4 corners per frame (`scripts/01b_annotate_corners.py`) on ~1 frame per GuiFiR-Vid train clip plus GAPS train-split frames, and generate the 126 points from the corners with the fret formula d_n ∝ 1 − 2^(−n/12) plus a homography. Crossed/concave corner sets are rejected (`corners_valid`).
+   - Splits: train = our annotations; val = GuiFiR val corners; test = GuiFiR test corners (held out). Report FCD (mean corner error, px at 640×360) as in the paper.
+   - Unverified: the mapping of GuiFiR `lt/lb/rt/rb` to our corners (default `lb,lt,rb,rt`, assuming headstock on the left and low E at the top). Check with `01c --visualize` once data is downloaded.
+   - Still needed for GAPS/own video at inference: a fretboard box detector (GuiFiR boxes only cover their own clips).
 2. **Homography** from 4+ points, e.g. both ends of the nut and both ends of the 12th fret.
 3. **Temporal smoothing** (moving average or Kalman) to stop warp jitter; reuse the last good warp when the hand occludes the neck.
 4. **Warp to a fixed strip** (~800×144 grayscale).
@@ -82,9 +89,11 @@ Secondary references for fretboard tracking:
 | Rectify the fretboard before the model | Nov 11 | V2N depends on a fixed-geometry strip. V2N's cross-dataset transfer collapses to near zero when geometry differs, so geometry normalisation matters even more for unconstrained guitar video. |
 | Equal-fret-width warp | Nov 11 | Makes pixel column correspond to fret, giving the model a positional prior like the slope prior. |
 | GuiFiR for the warp step | Nov 13 | Provides a dense fretboard grid; dataset is public. |
-| Train the fretboard estimator ourselves, not rely on released weights | Nov 16 | **Tentative**, still being considered. |
+| Train the fretboard estimator ourselves | Nov 16 | No released FPE weights or GuiFiR-Synth; only GuiFiR-Vid is public. |
+| Reconstruct only the GuiFiR FPE, not the full model | Nov 16 | The warp needs only fretboard points; the hand estimator / TabCNN / joint training would risk the timeline. |
+| FPE labels from manually clicked 4 corners → 126-point grid | Nov 16 | GuiFiR-Synth is not public; the paper itself derives grids from 4 corners. Annotating GAPS frames also serves the GAPS visibility audit. |
 | Drop the velocity head | Nov 11 | GAPS velocities are not real. |
-| Python 3.11 + PyTorch | Nov 16 | All reference code (V2N, GuiFiR, GAPS) and needed libraries (OpenCV, pretty_midi, mir_eval) are Python. |
+| Python 3.10 + PyTorch 2.1.2 | Nov 16 | All reference code (V2N, GuiFiR, GAPS) and needed libraries (OpenCV, pretty_midi, mir_eval) are Python. 3.10 / torch 2.1 because mmcv 2.1.0 has prebuilt wheels only for those (planned 3.11 changed). |
 | Evaluate only on real MIDI | Nov 13 | Pseudo-labels (magcil) would make test numbers meaningless. |
 
 ## Evaluation
@@ -115,7 +124,7 @@ Secondary references for fretboard tracking:
 ## Open questions
 
 1. **GAPS audit:** how many hours show the fretboard clearly enough to use?
-2. **Fretboard estimator:** train from scratch on the GuiFiR dataset, use released weights if available, or a synthetic-render keypoint model? How many landmarks are actually needed for a stable homography?
+2. **Fretboard estimator:** decided: GuiFiR FPE trained on our own corner annotations (see Stage 1). Open: how accurate it gets on real frames (fake-data check reached ~26 px median error on 640×360 after 100 epochs, still improving); which box detector to use on GAPS; whether the full 126 points or just 4 corners give the more stable homography.
 3. **Output representation:** pitch only, or string × fret (tablature)? This determines head size and the form of the position prior. Alternate tunings in GAPS need handling either way.
 4. **Offset head:** keep or drop? Guitar notes decay and are damped, so offsets are less visually defined than piano key releases.
 5. **Picking-hand stream:** add a second crop of the picking hand as input? Onsets are produced by the picking hand; the fretting hand mostly gives pitch.
@@ -127,18 +136,32 @@ Secondary references for fretboard tracking:
 ## Project structure
 
 ```
-configs/{data,preprocessing,model}/   YAML configs, copied into each run folder
-data/          (gitignored) raw/{gaps,magcil,own} → interim/{landmarks,homographies} → processed/strips, labels/, splits/
+configs/{data,preprocessing,model}/   configs, copied into each run folder (YAML; MMPose configs are Python)
+  preprocessing/fpe_res50_regression.py   FPE model/data/training config
+  preprocessing/fretboard_126_metainfo.py 126 keypoint names, loss weights, identity flip
+data/          (gitignored) raw/{gaps,magcil,guifir,own} → interim/{landmarks,homographies} → processed/strips, labels/, splits/
+               FPE: labels/fretboard_corners/*.jsonl (clicked corners), processed/fretboard_coco/{train,val,test}.json
 src/guitar2midi/   importable package: data, preprocessing, model, training, decoding, evaluation, utils
-scripts/       thin numbered entry points (00_audit_gaps, 01_extract_landmarks, 02_warp_strips, 03_make_labels, 04_make_splits, 10_train, 20_evaluate)
+  data/guifir.py                    GuiFiR-Vid reader (frames, neck boxes, GT corners, lt/lb/rt/rb mapping)
+  preprocessing/fretboard_grid.py   126-point grid from 4 corners, corners_valid, draw_grid
+  preprocessing/fpe_inference.py    FretboardPoseEstimator.predict(image, boxes) -> (N, 126, 2)
+scripts/       thin numbered entry points
+  done:    setup_mmpose.sh, 01a_prepare_guifir.sh, 01b_annotate_corners.py, 01c_build_fretboard_coco.py,
+           01d_train_fpe.py, 01e_eval_fpe.py
+  planned: 00_audit_gaps, 02_warp_strips, 03_make_labels, 04_make_splits, 10_train, 20_evaluate
 notebooks/     exploration only, numbered
-outputs/       (gitignored) runs/<YYYY-MM-DD>_<name>/{config.yaml,checkpoints,metrics,logs}
-tests/         unit tests
+outputs/       (gitignored) runs/<YYYY-MM-DD>_<name>/ (mmengine work_dir: merged config, checkpoints, logs)
+tests/         unit tests (test_fretboard_grid.py: grid geometry, weights, metainfo matches grid module)
 docs/papers/   reference PDFs; docs/notes/ protocol, audit results, meeting notes
 thesis/        LaTeX source (main.tex, chapters/, figures/, tables/; build/ gitignored)
 ```
 
-Environment: `conda env create -f environment.yml` (installs the package with `pip install -e .[dev]`).
+Environment (Miniforge installed at `~/miniforge3`, env `guitar2midi`, Python 3.10):
+`conda env create -f environment.yml && conda activate guitar2midi && bash scripts/setup_mmpose.sh`.
+For the GuiFiR download also `pip install -e .[data]` (gdown, yt-dlp). Run tests with `python -m pytest tests/`.
+Pinned because MMPose is fragile: torch 2.1.2 + cu121, mmcv 2.1.0, mmengine 0.10.7, mmdet 3.3.0 (imported by mmpose heads), mmpose 1.3.2 with `--no-deps` (chumpy fails to build), numpy<2, setuptools<81 (mmengine needs `pkg_resources`).
+
+FPE workflow: `01a_prepare_guifir.sh` (download) → `01b_annotate_corners.py` → `01c_build_fretboard_coco.py --manual ... --visualize 20` → `01d_train_fpe.py --run-name ...` → `01e_eval_fpe.py --run outputs/runs/<run>`. Config: `configs/preprocessing/fpe_res50_regression.py` (paths relative to `data_root='data/'`).
 
 ## Working conventions for Claude Code
 

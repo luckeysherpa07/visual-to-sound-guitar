@@ -7,6 +7,8 @@ Master's thesis (JMU Würzburg): predicting MIDI notes from silent guitar video 
 ```bash
 conda env create -f environment.yml
 conda activate guitar2midi
+bash scripts/setup_mmpose.sh   # pinned mmcv / mmdet / mmpose
+pip install -e .[data]         # only for downloading GuiFiR (gdown, yt-dlp)
 ```
 
 ## Layout

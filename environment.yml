@@ -1,13 +1,15 @@
+# conda env create -f environment.yml && conda activate guitar2midi
+# then: bash scripts/setup_mmpose.sh   (mmcv/mmpose need pinned versions)
 name: guitar2midi
 channels:
-  - pytorch
-  - nvidia
   - conda-forge
 dependencies:
-  - python=3.11
-  - pytorch
-  - torchvision
-  - pytorch-cuda=12.1
+  - python=3.10
   - pip
+  - ffmpeg
   - pip:
+      - --extra-index-url https://download.pytorch.org/whl/cu121
+      - torch==2.1.2
+      - torchvision==0.16.2
+      - numpy<2
       - -e .[dev]

@@ -60,10 +60,13 @@ def manual_entries(paths: list[Path], exclude_clips: set[str]) -> list[dict]:
 
 
 def guifir_entries(split: str, keys) -> list[dict]:
-    out = []
+    out, no_frame = [], 0
     for rec in guifir.load_split(split):
         corners = guifir.gt_corners(rec, keys)
         if corners is None:
+            continue
+        if not guifir.frame_path(rec, split).exists():  # index beyond clip end
+            no_frame += 1
             continue
         if not corners_valid(corners):
             print(f"  skip {split} {rec['filename']}: invalid corners (check --corner-keys)")
@@ -71,6 +74,8 @@ def guifir_entries(split: str, keys) -> list[dict]:
         img = guifir.frame_path(rec, split).relative_to(DATA_ROOT)
         out.append(make_entry(str(img), rec["frame_width"], rec["frame_height"],
                               corners, "manual_guifir", guifir.neck_box(rec)))
+    if no_frame:
+        print(f"  {split}: skipped {no_frame} frames not extracted (see frames/missing.txt)")
     return out
 
 

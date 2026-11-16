@@ -2,7 +2,7 @@
 
 Master's thesis (Computer Science, JMU Würzburg). Author: Ruluckey "Luckey" Sherpa. Supervisor: Zongwei Wu.
 **Hard deadline: Feb 1, 2027. Experiment freeze: Jan 6, 2027.**
-Status as of 2026-11-16: project structure set up; fretboard pose estimator (FPE) code written and verified end to end on generated fake fretboards only. No real data downloaded or annotated yet. Update this file when decisions change.
+Status as of 2026-11-16: project structure set up; FPE code written and verified end to end on fake fretboards. GuiFiR-Vid downloaded and prepared (annotated frames extracted, val/test COCO files built and checked visually). No corners clicked yet, so no train set and no real training run. Update this file when decisions change.
 
 ## Goal
 
@@ -31,7 +31,9 @@ video ─► fretboard landmarks ─► homography ─► temporal smoothing ─
    - Loss: smooth L1 with per-point weights: corners 1/4, 46 edge points 1/46, 76 internal 1/76.
    - Labels: the public GuiFiR release is GuiFiR-Vid only (clips, tablature, detector neck boxes; 4 corners `lt/lb/rt/rb` only on val 543 / test 2,048 frames, in 640×360 coords). **GuiFiR-Synth (126-point labels) is not released.** So we click 4 corners per frame (`scripts/01b_annotate_corners.py`) on ~1 frame per GuiFiR-Vid train clip plus GAPS train-split frames, and generate the 126 points from the corners with the fret formula d_n ∝ 1 − 2^(−n/12) plus a homography. Crossed/concave corner sets are rejected (`corners_valid`).
    - Splits: train = our annotations; val = GuiFiR val corners; test = GuiFiR test corners (held out). Report FCD (mean corner error, px at 640×360) as in the paper.
-   - Unverified: the mapping of GuiFiR `lt/lb/rt/rb` to our corners (default `lb,lt,rb,rt`, assuming headstock on the left and low E at the top). Check with `01c --visualize` once data is downloaded.
+   - GuiFiR corner mapping **verified** (Nov 16): `lt/lb/rt/rb` are image sides and the player faces the camera, so the **nut is on the image right**. Our order (nut/high-E, nut/low-E, f20/high-E, f20/low-E) = `rb, rt, lb, lt`. Evidence: fretting hand in the right half in all 1,483 low-fret val/test frames, right side narrower, overlays align.
+   - GuiFiR frames: annotation names `<clip>/<clip>_NNN.png` are 0-based native-fps frame indices. The official `extract_frames.py` names frames differently and extracts everything (~300k PNGs), so `01a` uses `guifir.extract_annotated_frames` instead (~11 GB). 63 annotated frames have an index past the clip end (train 2, val 4, test 57; listed in `frames/missing.txt`) and are skipped → val 539, test 1,991 usable frames.
+   - GuiFiR videos are mostly tab-tutorial videos (tab/score overlays on screen, mostly acoustic, front-facing camera).
    - Still needed for GAPS/own video at inference: a fretboard box detector (GuiFiR boxes only cover their own clips).
 2. **Homography** from 4+ points, e.g. both ends of the nut and both ends of the 12th fret.
 3. **Temporal smoothing** (moving average or Kalman) to stop warp jitter; reuse the last good warp when the hand occludes the neck.
@@ -142,7 +144,7 @@ configs/{data,preprocessing,model}/   configs, copied into each run folder (YAML
 data/          (gitignored) raw/{gaps,magcil,guifir,own} → interim/{landmarks,homographies} → processed/strips, labels/, splits/
                FPE: labels/fretboard_corners/*.jsonl (clicked corners), processed/fretboard_coco/{train,val,test}.json
 src/guitar2midi/   importable package: data, preprocessing, model, training, decoding, evaluation, utils
-  data/guifir.py                    GuiFiR-Vid reader (frames, neck boxes, GT corners, lt/lb/rt/rb mapping)
+  data/guifir.py                    GuiFiR-Vid reader (frames, neck boxes, GT corners, lt/lb/rt/rb mapping, extract_annotated_frames)
   preprocessing/fretboard_grid.py   126-point grid from 4 corners, corners_valid, draw_grid
   preprocessing/fpe_inference.py    FretboardPoseEstimator.predict(image, boxes) -> (N, 126, 2)
 scripts/       thin numbered entry points

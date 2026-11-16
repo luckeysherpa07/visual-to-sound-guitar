@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Download and prepare GuiFiR-Vid into data/raw/guifir/ using the official scripts
 # (github.com/kmu-ee-ailab/guifir_dataset). Dataset terms: non-commercial research.
-# Requires: pip install -e .[data]  (gdown, yt-dlp), ffmpeg.
+# Requires: pip install -e .[data]  (gdown, yt-dlp; only if the tar is not already in tmp/).
+# If downloaded manually, put it at data/raw/guifir/tmp/GuiFiR.tar (it is kept).
 #
 # Result:
 #   data/raw/guifir/guifir_vid/{train,val,test}/{videos,frames,annotations}/
@@ -42,12 +43,18 @@ python "$S/split_clips.py" \
   --split_csv guifir_vid/metadata/split.csv \
   --output_dir guifir_vid
 
+# Extract ONLY the annotated frames (~31.6k), named like the annotations
+# (<clip>/<clip>_NNN.png, 0-based index). The official extract_frames.py writes
+# every frame as 000001.png (~300k PNGs, 100+ GB) which does not match the names.
+cd "$ROOT"
 for split in train val test; do
-  python "$S/extract_frames.py" \
-    --input "guifir_vid/$split/videos" \
-    --output "guifir_vid/$split/frames" \
-    --ext png
+  python -c "
+from guitar2midi.data import guifir
+saved, missing = guifir.extract_annotated_frames('$split')
+print('$split: saved', saved, 'frames, missing (index beyond clip end)', missing)
+"
 done
 
-rm -rf tmp
+# Keep tmp/GuiFiR.tar (manual download); remove only the unpacked copy.
+rm -rf "$OUT/tmp/GuiFiR"
 echo "GuiFiR-Vid ready in $OUT/guifir_vid"

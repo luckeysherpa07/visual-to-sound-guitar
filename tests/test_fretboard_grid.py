@@ -47,6 +47,16 @@ def test_corners_valid():
     assert not fg.corners_valid(crossed)
 
 
+def test_corners_from_fret12_clicks_round_trip():
+    # perspective quad: clicking the nut and fret 12 of its grid must give back the same corners
+    corners = np.array([[492, 43], [480, 16], [278, 137], [266, 108]], float)
+    grid = fg.grid_from_corners(corners)
+    for fret in (5, 12, 19):
+        clicks = grid[[fg.kp_index(0, 0), fg.kp_index(5, 0), fg.kp_index(0, fret), fg.kp_index(5, fret)]]
+        assert np.allclose(fg.corners_from_clicks(clicks, fret), corners, atol=1e-2)
+    assert np.allclose(fg.corners_from_clicks(corners, 20), corners)
+
+
 def test_identity_homography_matches_template():
     grid = fg.grid_from_corners(fg.TEMPLATE_CORNERS)
     assert np.allclose(grid, fg.template_grid(), atol=1e-5)

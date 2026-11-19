@@ -102,6 +102,25 @@ def grid_from_corners(corners: np.ndarray) -> np.ndarray:
     return cv2.perspectiveTransform(pts, H).reshape(-1, 2).astype(np.float64)
 
 
+def corners_from_clicks(clicks: np.ndarray, fret: int = NUM_FRETS) -> np.ndarray:
+    """The 4 standard corners (nut + fret 20) from clicks on the nut and fret ``fret``.
+
+    ``clicks``: (4, 2) as nut/high-E, nut/low-E, fret/high-E, fret/low-E. Used when
+    fret 20 is hidden or missing (classical guitars have 19 frets): the user clicks
+    e.g. fret 12 and fret 20 is extrapolated with the same fret formula / homography
+    that generates the grid, so the result is exact up to click noise.
+    """
+    clicks = np.asarray(clicks, dtype=np.float32).reshape(4, 2)
+    if fret == NUM_FRETS:
+        return clicks.astype(np.float64)
+    if not 1 <= fret < NUM_FRETS:
+        raise ValueError(f"fret must be in 1..{NUM_FRETS}, got {fret}")
+    x = fret_positions()[fret]
+    src = np.array([[0, 0], [0, 1], [x, 0], [x, 1]], dtype=np.float32)
+    H = cv2.getPerspectiveTransform(src, clicks)
+    return cv2.perspectiveTransform(TEMPLATE_CORNERS.reshape(-1, 1, 2), H).reshape(4, 2).astype(np.float64)
+
+
 def draw_grid(image: np.ndarray, grid: np.ndarray, thickness: int = 1) -> np.ndarray:
     """Draw strings (green), frets (blue), nut (red) and corners on a copy of ``image``."""
     out = image.copy()

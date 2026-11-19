@@ -20,6 +20,8 @@ dependencies = [
 dev = ["pytest", "jupyter"]
 # GuiFiR dataset download (gdown archive, yt-dlp clips)
 data = ["gdown", "yt-dlp"]
+# corner annotation GUI (01b): keeps the OpenCV window on top under X11
+annotate = ["python-xlib"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

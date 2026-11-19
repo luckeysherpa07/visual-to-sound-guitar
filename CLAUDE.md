@@ -2,7 +2,7 @@
 
 Master's thesis (Computer Science, JMU Würzburg). Author: Ruluckey "Luckey" Sherpa. Supervisor: Zongwei Wu.
 **Hard deadline: Feb 1, 2027. Experiment freeze: Jan 6, 2027.**
-Status as of 2026-11-16: project structure set up; FPE code written and verified end to end on fake fretboards. GuiFiR-Vid downloaded and prepared (annotated frames extracted, val/test COCO files built and checked visually). No corners clicked yet, so no train set and no real training run. Update this file when decisions change.
+Status as of 2026-11-19: project structure set up; FPE code written and verified end to end on fake fretboards. GuiFiR-Vid downloaded and prepared (annotated frames extracted, val/test COCO files built and checked visually). Corner annotation tool finished (fret-12 clicking, browser mode for SSH). No corners clicked yet, so no train set and no real training run. Update this file when decisions change.
 
 ## Goal
 
@@ -30,6 +30,8 @@ video ─► fretboard landmarks ─► homography ─► temporal smoothing ─
    - 126 points = 6 strings × (nut + 20 frets); index `string * 21 + fret`, string 0 = high E, fret 0 = nut. Labels are physical, so horizontal flip uses identity flip indices.
    - Loss: smooth L1 with per-point weights: corners 1/4, 46 edge points 1/46, 76 internal 1/76.
    - Labels: the public GuiFiR release is GuiFiR-Vid only (clips, tablature, detector neck boxes; 4 corners `lt/lb/rt/rb` only on val 543 / test 2,048 frames, in 640×360 coords). **GuiFiR-Synth (126-point labels) is not released.** So we click 4 corners per frame (`scripts/01b_annotate_corners.py`) on ~1 frame per GuiFiR-Vid train clip plus GAPS train-split frames, and generate the 126 points from the corners with the fret formula d_n ∝ 1 − 2^(−n/12) plus a homography. Crossed/concave corner sets are rejected (`corners_valid`).
+   - Annotation clicks: by default the 3rd/4th clicks go on **fret 12** (double-dot marker, nearly always visible; on classical guitars the neck/body joint, and classical guitars often have only 19 frets). Fret 20 is extrapolated with the same fret formula + homography (`fretboard_grid.corners_from_clicks`), so it is exact up to click noise. Key `f` switches to clicking fret 20 directly. Records always store nut + fret-20 `corners`, plus the raw `clicks` and `clicked_fret` for traceability.
+   - Annotation UI: OpenCV window (kept on top under X11 via `python-xlib`, `pip install -e .[annotate]`), or `--web [PORT]` (default 8765) for SSH: a local browser page at http://localhost:8765/ with the same keys; VS Code forwards the port.
    - Splits: train = our annotations; val = GuiFiR val corners; test = GuiFiR test corners (held out). Report FCD (mean corner error, px at 640×360) as in the paper.
    - GuiFiR corner mapping **verified** (Nov 16): `lt/lb/rt/rb` are image sides and the player faces the camera, so the **nut is on the image right**. Our order (nut/high-E, nut/low-E, f20/high-E, f20/low-E) = `rb, rt, lb, lt`. Evidence: fretting hand in the right half in all 1,483 low-fret val/test frames, right side narrower, overlays align.
    - GuiFiR frames: annotation names `<clip>/<clip>_NNN.png` are 0-based native-fps frame indices. The official `extract_frames.py` names frames differently and extracts everything (~300k PNGs), so `01a` uses `guifir.extract_annotated_frames` instead (~11 GB). 63 annotated frames have an index past the clip end (train 2, val 4, test 57; listed in `frames/missing.txt`) and are skipped → val 539, test 1,991 usable frames.
@@ -94,6 +96,7 @@ Secondary references for fretboard tracking:
 | Train the fretboard estimator ourselves | Nov 16 | No released FPE weights or GuiFiR-Synth; only GuiFiR-Vid is public. |
 | Reconstruct only the GuiFiR FPE, not the full model | Nov 16 | The warp needs only fretboard points; the hand estimator / TabCNN / joint training would risk the timeline. |
 | FPE labels from manually clicked 4 corners → 126-point grid | Nov 16 | GuiFiR-Synth is not public; the paper itself derives grids from 4 corners. Annotating GAPS frames also serves the GAPS visibility audit. |
+| Click nut + fret 12 instead of fret 20 when annotating corners | Nov 19 | Fret 20 is often hidden by the hand/body or absent (19-fret classical guitars); fret 12 is marked and visible, and fret 20 follows exactly from the fret formula. |
 | Drop the velocity head | Nov 11 | GAPS velocities are not real. |
 | Python 3.10 + PyTorch 2.1.2 | Nov 16 | All reference code (V2N, GuiFiR, GAPS) and needed libraries (OpenCV, pretty_midi, mir_eval) are Python. 3.10 / torch 2.1 because mmcv 2.1.0 has prebuilt wheels only for those (planned 3.11 changed). |
 | Evaluate only on real MIDI | Nov 13 | Pseudo-labels (magcil) would make test numbers meaningless. |
@@ -160,7 +163,7 @@ thesis/        LaTeX source (main.tex, chapters/, figures/, tables/; build/ giti
 
 Environment (Miniforge installed at `~/miniforge3`, env `guitar2midi`, Python 3.10):
 `conda env create -f environment.yml && conda activate guitar2midi && bash scripts/setup_mmpose.sh`.
-For the GuiFiR download also `pip install -e .[data]` (gdown, yt-dlp). Run tests with `python -m pytest tests/`.
+For the GuiFiR download also `pip install -e .[data]` (gdown, yt-dlp); for the corner annotation window `pip install -e .[annotate]` (python-xlib). Run tests with `python -m pytest tests/`.
 Pinned because MMPose is fragile: torch 2.1.2 + cu121, mmcv 2.1.0, mmengine 0.10.7, mmdet 3.3.0 (imported by mmpose heads), mmpose 1.3.2 with `--no-deps` (chumpy fails to build), numpy<2, setuptools<81 (mmengine needs `pkg_resources`).
 
 FPE workflow: `01a_prepare_guifir.sh` (download) → `01b_annotate_corners.py` → `01c_build_fretboard_coco.py --manual ... --visualize 20` → `01d_train_fpe.py --run-name ...` → `01e_eval_fpe.py --run outputs/runs/<run>`. Config: `configs/preprocessing/fpe_res50_regression.py` (paths relative to `data_root='data/'`).

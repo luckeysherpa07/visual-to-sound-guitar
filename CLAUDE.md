@@ -2,7 +2,7 @@
 
 Master's thesis (Computer Science, JMU Würzburg). Author: Ruluckey "Luckey" Sherpa. Supervisor: Zongwei Wu.
 **Hard deadline: Feb 1, 2027. Experiment freeze: Jan 6, 2027.**
-Status as of 2026-11-19: project structure set up; FPE code written and verified end to end on fake fretboards. GuiFiR-Vid downloaded and prepared (annotated frames extracted, val/test COCO files built and checked visually). Corner annotation tool finished (fret-12 clicking, browser mode for SSH). No corners clicked yet, so no train set and no real training run. Update this file when decisions change.
+Status as of 2026-11-23: after the supervisor meeting on Nov 23, the FPE work (Stage 1) is **paused** and the current phase is the **baseline study** (see below): measure how badly existing off-the-shelf models do on our guitar data before building our own. After that, GuiFiR work resumes, now including the hand pose estimator. FPE state when paused: code written and verified end to end on fake fretboards, GuiFiR-Vid prepared (val/test COCO files), corner annotation tool finished, 3 train frames clicked, no real training run. Update this file when decisions change.
 
 ## Goal
 
@@ -16,6 +16,31 @@ Scope is locked to MIDI prediction. Audio generation and performance feedback (e
 - **Output:** note events (pitch, onset, and offset where reliable) written as MIDI.
 - **Not predicted:** velocity. GAPS velocities are not real, so there is no trustworthy supervision.
 
+## Current phase: baseline study (existing models) — started 2026-11-23
+
+Supervisor's request: before going into GuiFiR detail, get a bird's-eye view of how well existing video→audio / video→MIDI models already do on guitar ("how bad are they really"). Full plan: `docs/notes/2026-11-23_baseline_study_plan.md`.
+
+- **Core idea:** silent video → V2A model → generated audio → audio transcription → MIDI → compare with GAPS ground-truth MIDI (mir_eval note F1). The same transcription model on the **real** audio is the ceiling, so the gap is the V2A error.
+- **Models:** MMAudio (primary V2A, open weights, fits the RTX 4080 16 GB); V2N zero-shot (piano video→MIDI on warped guitar strips); optional HunyuanVideo-Foley / ThinkSound / Foley Music. No public guitar video→MIDI model exists.
+- **Data:** GAPS test split, ~20 pieces × 3 clips × 8 s. magcil only as pseudo comparison; own data later with the same scripts.
+- **External models run in their own conda envs** (`mmaudio`, `v2n`; they need newer torch than our pinned 2.1.2). They exchange data with our code only through files (clip CSV, wav, MIDI).
+- Each checkpoint ends with a visible output and a stop for review.
+
+| CP | What | You see | Status |
+|---|---|---|---|
+| 0 | Save plan in CLAUDE.md + `docs/notes/` | CLAUDE.md diff | done |
+| 1 | GAPS data: unzip `gaps_v1_no_audio.zip`, audio (HF `xavriley/GAPS`), test videos (yt-dlp) | summary: pieces, videos ok/missing, hours | todo |
+| 2 | Eval clips: silent video + real audio + GT MIDI per clip, sync check | `clips.csv`, contact sheet, 3 piano rolls | todo |
+| 3 | Transcription ceiling on real audio (GAPS authors' model, fallback basic-pitch) + metrics code | ceiling F1 ≈ GAPS paper level | todo |
+| 4 | MMAudio on all clips, no prompt and "solo classical guitar" | ~5 videos with generated audio | todo |
+| 5 | Fretboard strips for V2N: click nut + fret 12 per clip → homography → 800×144 strip | grid of all strips | todo |
+| 6 | V2N zero-shot on the strips (public checkpoints) | predicted vs GT piano roll | todo |
+| 7 | Results table: ceiling / MMAudio ± prompt / V2N zero-shot / shuffled video / silence | table + summary for supervisor | todo |
+| 8 | V2N fine-tuning pilot: guitar heads, GAPS train strips (1 click set per video); full fine-tune vs scratch (LoRA optional) | curves + table rows | todo |
+| 9 | Optional: more V2A models, magcil (pseudo), own data | extra table rows | todo |
+
+Targets: CP7 by ~Nov 28, CP8 by ~Dec 4. If CP8 has no results after ~4 days, move it to the main experiments phase.
+
 ## Pipeline
 
 ```
@@ -23,7 +48,7 @@ video ─► fretboard landmarks ─► homography ─► temporal smoothing ─
       ─► V2N-style model ─► onset / frame (hold) [/ offset] heads ─► peak decoding ─► MIDI
 ```
 
-### Stage 1: fretboard preprocessing (current focus)
+### Stage 1: fretboard preprocessing (paused 2026-11-23; resumes after the baseline study, with hand pose)
 
 1. **Landmark detection per frame.** Method: GuiFiR fretboard pose estimator (FPE) only, no hand pose / TabCNN / joint fine-tuning.
    - Model (GuiFiR §IV-A.2): MMPose top-down regression, ResNet-50 (ImageNet init) → global average pooling → linear → 126 (x, y). Input = fretboard box + 10% padding, 256×256 crop.
@@ -100,6 +125,10 @@ Secondary references for fretboard tracking:
 | Drop the velocity head | Nov 11 | GAPS velocities are not real. |
 | Python 3.10 + PyTorch 2.1.2 | Nov 16 | All reference code (V2N, GuiFiR, GAPS) and needed libraries (OpenCV, pretty_midi, mir_eval) are Python. 3.10 / torch 2.1 because mmcv 2.1.0 has prebuilt wheels only for those (planned 3.11 changed). |
 | Evaluate only on real MIDI | Nov 13 | Pseudo-labels (magcil) would make test numbers meaningless. |
+| Baseline study of existing models before more FPE work; GuiFiR resumes afterwards, including hand pose | Nov 23 | Supervisor: get a bird's-eye view of how bad existing video→audio/MIDI models are on guitar first; this is also the thesis motivation. |
+| Score V2A models via audio transcription, with the real-audio transcription as ceiling | Nov 23 | V2A models output audio, not MIDI; the ceiling separates V2A error from transcription error. |
+| V2N zero-shot uses strips from manually clicked corners | Nov 23 | Exact, fair crop so V2N's failure is due to piano→guitar, not cropping; FPE not trained yet; clicks reusable as FPE training data. |
+| V2N on guitar: full fine-tune vs scratch; LoRA only as optional ablation | Nov 23 | V2N is small (ResNet-18 + conv blocks + BiLSTM, no attention) and fits 16 GB; LoRA saves little and suits conv/LSTM layers poorly; heads must be replaced anyway. |
 
 ## Evaluation
 
@@ -154,6 +183,8 @@ scripts/       thin numbered entry points
   done:    setup_mmpose.sh, 01a_prepare_guifir.sh, 01b_annotate_corners.py, 01c_build_fretboard_coco.py,
            01d_train_fpe.py, 01e_eval_fpe.py
   planned: 00_audit_gaps, 02_warp_strips, 03_make_labels, 04_make_splits, 10_train, 20_evaluate
+  baseline study (planned): 30a_download_gaps, 30b_make_eval_clips, 30c_run_mmaudio.sh, 30d_transcribe,
+           30e_evaluate_baselines, 30f_make_v2n_strips, 30g_run_v2n.sh, 30h_finetune_v2n
 notebooks/     exploration only, numbered
 outputs/       (gitignored) runs/<YYYY-MM-DD>_<name>/ (mmengine work_dir: merged config, checkpoints, logs)
 tests/         unit tests (test_fretboard_grid.py: grid geometry, weights, metainfo matches grid module)

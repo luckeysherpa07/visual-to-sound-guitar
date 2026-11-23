@@ -2,7 +2,7 @@
 
 Master's thesis (Computer Science, JMU Würzburg). Author: Ruluckey "Luckey" Sherpa. Supervisor: Zongwei Wu.
 **Hard deadline: Feb 1, 2027. Experiment freeze: Jan 6, 2027.**
-Status as of 2026-11-23: after the supervisor meeting on Nov 23, the FPE work (Stage 1) is **paused** and the current phase is the **baseline study** (see below): measure how badly existing off-the-shelf models do on our guitar data before building our own. After that, GuiFiR work resumes, now including the hand pose estimator. FPE state when paused: code written and verified end to end on fake fretboards, GuiFiR-Vid prepared (val/test COCO files), corner annotation tool finished, 3 train frames clicked, no real training run. Update this file when decisions change.
+Status as of 2026-11-24: CP0–CP6 done (CP6: V2N zero-shot = silence on guitar). After the supervisor meeting on Nov 23, the FPE work (Stage 1) is **paused** and the current phase is the **baseline study** (see below): measure how badly existing off-the-shelf models do on our guitar data before building our own. After that, GuiFiR work resumes, now including the hand pose estimator. FPE state when paused: code written and verified end to end on fake fretboards, GuiFiR-Vid prepared (val/test COCO files), corner annotation tool finished, 3 train frames clicked, no real training run. Update this file when decisions change.
 
 ## Goal
 
@@ -34,9 +34,9 @@ Supervisor's request: before going into GuiFiR detail, get a bird's-eye view of 
 | 3 | Transcription ceiling on real audio (GAPS authors' model) + metrics code | ceiling F1 ≈ GAPS paper level | done (Nov 23): onset F1@50 ms **93.5 %** (paper: 93.4–94.3), frame F1 83.0, median per clip 95.0, min 67.7. Checkpoint `guitar-gaps-paper-version-12200_iterations.pth` (env `amt`), used for all systems |
 | 4 | MMAudio on all clips, no prompt and "solo classical guitar" | ~5 videos with generated audio | done (Nov 23): large_44k_v2, seed 42, 90 × 2 clips in ~9 min (env `mmaudio`). Output looks like plucked strings with plausible rhythm, pitches mostly off (spectrograms). No leakage: clips have no audio stream; 0/300 GAPS videos in VGGSound |
 | 5 | Fretboard strips for V2N: cut detection, click nut + fret 12 on one frame per clip, **track the corners through the clip**, warp to 800×144 strips | tracking sheet (3 frames + strips per clip) | done (Nov 23): 74 clips with strips, 16 skipped (fretboard not fully visible). Frames outside the clicked shot (cuts) or in dissolves (`invalid_frames.txt`) are masked: `<clip>_valid.npy`; evaluation with `30e --mask-dir` scores all systems on the same 74 clips / 96 % of frames (MMAudio there: 3.1 % note F1, ceiling 93.6 %) |
-| 6 | V2N zero-shot on the strips (public checkpoints) | predicted vs GT piano roll | todo |
-| 7 | Results table: ceiling / MMAudio ± prompt / V2N zero-shot / shuffled video / silence | table + summary for supervisor | MMAudio part done (Nov 23): note F1 **3.3 %** vs ceiling 93.5 % (chance 2.1 %); timing F1 35.9 vs chance ~27 (significant); chroma = chance; prompt no effect. V2N rows after CP6 |
-| 8 | V2N fine-tuning pilot: guitar heads, GAPS train strips (1 click set per video); full fine-tune vs scratch (LoRA optional) | curves + table rows | todo |
+| 6 | V2N zero-shot on the strips (public checkpoints) | predicted vs GT piano roll | done (Nov 24): wrapper verified on a PianoVAM test video (identical to V2N's shipped prediction, 94.3 % onset F1). On guitar: **1 note in 74 clips** = silence baseline (all metrics 0); onset probs ~1e-3, no timing signal (r with GT onsets = shuffled, p = 0.67). **Open:** Luckey doubts the 0.0; re-check strip layout/orientation vs V2N's piano crop before finalising CP7 (checklist in the log) |
+| 7 | Results table: ceiling / MMAudio ± prompt / V2N zero-shot / shuffled video / silence | table + summary for supervisor | MMAudio part done (Nov 23): note F1 **3.3 %** vs ceiling 93.5 % (chance 2.1 %); timing F1 35.9 vs chance ~27 (significant); chroma = chance; prompt no effect. V2N row added (Nov 24, run `2026-11-24_cp7_v2n_masked`): 0.0 on every metric. Still todo: final table in `thesis/tables/` + supervisor summary |
+| 8 | V2N fine-tuning pilot: guitar heads, GAPS train strips (1 click set per video); full fine-tune vs scratch (LoRA optional) | curves + table rows | todo. Draft plan (not approved): `docs/notes/2026-11-24_v2n_guitar_adaptation_plan.md` — no V2N model-code change needed: `Transcriber_OnsetFrame`, 88 outputs kept, our strips/labels written in V2N's HDF5/TSV format; runs A piano-init fine-tune, B ConvNeXt-T ImageNet-22k, C scratch |
 | 9 | Optional: more V2A models, magcil (pseudo), own data | extra table rows | todo |
 
 Targets: CP7 by ~Nov 28, CP8 by ~Dec 4. If CP8 has no results after ~4 days, move it to the main experiments phase.
@@ -182,6 +182,7 @@ src/guitar2midi/   importable package: data, preprocessing, model, training, dec
   data/guifir.py                    GuiFiR-Vid reader (frames, neck boxes, GT corners, lt/lb/rt/rb mapping, extract_annotated_frames)
   data/gaps.py                      GAPS v1.1 reader/downloader: metadata+splits, audio/MIDI (HF), videos (yt-dlp) → data/raw/gaps/{audio,midi,videos}/<id>.*
   baselines/v2a_mmaudio.py          MMAudio wrapper (env mmaudio only): model loaded once, weights in ~/.cache/mmaudio, mux for listening
+  baselines/v2n.py                  V2N wrapper (env v2n only): V2N's own model/stitching/decoder from ~/external/V2N (commit a6408c4, override with $V2N_REPO) on our .npy strips; checkpoint in ~/.cache/v2n; GT-vs-V2N roll plot
   baselines/audio_plots.py          real vs generated spectrograms with GT notes overlaid
   baselines/transcribe.py           audio→MIDI with the GAPS benchmark model (env amt only)
   evaluation/note_metrics.py        onset F1 @50/100 ms, onset+offset F1, frame F1 (25 fps), timing F1 (pitch ignored), chroma similarity, onset correlation (mir_eval)
@@ -196,18 +197,19 @@ scripts/       thin numbered entry points
   planned: 00_audit_gaps, 02_warp_strips, 03_make_labels, 04_make_splits, 10_train, 20_evaluate
   baseline study: done 30a_download_gaps (--split test|train, --no-audio, --no-videos), 30b_make_eval_clips (→ data/interim/baseline_clips/), 30c_run_mmaudio (env mmaudio), 30c_plot_spectrograms, 30d_transcribe (env amt), 30e_evaluate_baselines (→ outputs/runs/);
            30f_prepare_strip_frames (cuts + frames to click), 30f_make_v2n_strips (tracking + strips);
-           planned 30g_run_v2n.sh, 30h_finetune_v2n
+           30g_run_v2n (env v2n, → transcriptions/v2n_zeroshot), 30g_check_v2n_piano (positive control on one PianoVAM video in data/raw/pianovam);
+           planned 30h_finetune_v2n
 notebooks/     exploration only, numbered
 outputs/       (gitignored) runs/<YYYY-MM-DD>_<name>/ (mmengine work_dir: merged config, checkpoints, logs)
 tests/         unit tests (test_fretboard_grid.py: grid geometry, weights, metainfo matches grid module; test_note_metrics.py: metric sanity)
-envs/          extra conda envs for external models (amt.yml, mmaudio.yml)
+envs/          extra conda envs for external models (amt.yml, mmaudio.yml, v2n.yml)
 docs/papers/   reference PDFs; docs/notes/ protocol, audit results, meeting notes
 thesis/        LaTeX source (main.tex, chapters/, figures/, tables/; build/ gitignored)
 ```
 
 Environment (Miniforge installed at `~/miniforge3`, env `guitar2midi`, Python 3.10):
 `conda env create -f environment.yml && conda activate guitar2midi && bash scripts/setup_mmpose.sh`.
-Extra envs for the baseline study (each: `conda env create -f envs/<name>.yml`, then `pip install -e . --no-deps`): `amt` (GAPS audio-to-MIDI model) and `mmaudio` (MMAudio V2A). Separate because both need a recent torch (2.15), which breaks mmcv in `guitar2midi`. Scripts state which env they need.
+Extra envs for the baseline study (each: `conda env create -f envs/<name>.yml`, then `pip install -e . --no-deps`): `amt` (GAPS audio-to-MIDI model), `mmaudio` (MMAudio V2A) and `v2n` (V2N; also needs the repo clone + checkpoint download listed in `envs/v2n.yml`). Separate because all need a recent torch (2.15), which breaks mmcv in `guitar2midi`. Scripts state which env they need.
 For the GuiFiR download also `pip install -e .[data]` (gdown, yt-dlp); for the corner annotation window `pip install -e .[annotate]` (python-xlib). Run tests with `python -m pytest tests/`.
 Pinned because MMPose is fragile: torch 2.1.2 + cu121, mmcv 2.1.0, mmengine 0.10.7, mmdet 3.3.0 (imported by mmpose heads), mmpose 1.3.2 with `--no-deps` (chumpy fails to build), numpy<2, setuptools<81 (mmengine needs `pkg_resources`).
 

@@ -1,0 +1,37 @@
+# V2N env for the baseline study (CP6, CP8): visual piano transcription (Kim et al., ISMIR 2026).
+# Separate from guitar2midi because V2N targets Python 3.11 / recent torch (breaks the pinned mmcv/torch 2.1.2).
+#   conda env create -f envs/v2n.yml && conda activate v2n && pip install -e . --no-deps
+# V2N itself is not a package: clone it and pin the commit the results were made with:
+#   git clone https://github.com/yonghyunk1m/V2N ~/external/V2N && git -C ~/external/V2N checkout a6408c4
+# Checkpoint (release v0.1, 108 MB, CC BY-NC 4.0) goes to ~/.cache/v2n/v2n_pianovam.safetensors:
+#   curl -L --create-dirs -o ~/.cache/v2n/v2n_pianovam.safetensors \
+#        https://github.com/yonghyunk1m/V2N/releases/download/v0.1/v2n_pianovam.safetensors
+# The repo path can be overridden with the env var V2N_REPO.
+name: v2n
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      - torch
+      - torchvision
+      - timm>=0.9
+      - safetensors
+      - hydra-core>=1.3
+      - omegaconf
+      - h5py
+      - opencv-python-headless
+      - numpy
+      - scipy
+      - mido
+      - mir_eval>=0.7
+      - pretty_midi
+      - matplotlib
+      - tqdm
+      # only imported (not used) by V2N's predict.py / data package:
+      - transformers>=4.40
+      - albumentations
+      - librosa
+      - soundfile
+      - huggingface_hub

@@ -402,3 +402,61 @@ shot, minus the dissolve frames. Example: `291_3Sswc_c3` is valid from frame 88 
   be charged for notes in black (no-view) frames.
 
 From now on the masked subset is the reference for all rows that include V2N.
+
+## CP6 — V2N zero-shot on the guitar strips (2026-11-24)
+
+**Setup.** Public checkpoint `v2n_pianovam.safetensors` (release v0.1, trained on PianoVAM), V2N repo at commit
+`a6408c4` in `~/external/V2N`, env `v2n` (`envs/v2n.yml`). Wrapper `guitar2midi.baselines.v2n` uses V2N's own
+model, window stitching and note decoder unchanged; only the input loading is ours (our 800×144 `.npy` strips instead
+of their HDF5). Same settings as V2N's test time: 1 s windows, stride 13 frames, centre stitching, onset/frame
+threshold 0.5, fp32. Script `scripts/30g_run_v2n.py` → `transcriptions/v2n_zeroshot/`, probabilities in
+`v2n_probs/`, plots in `plots/v2n/`. 74 clips in 28 s.
+
+**Positive control first (is our wrapper right?).** `scripts/30g_check_v2n_piano.py` runs the wrapper on one
+PianoVAM test video (`2024-02-17_21-44-37`, 178 s), preprocessed with V2N's own warp function. Result
+(`outputs/runs/2026-11-24_cp6_v2n_piano_check/`): 538 notes, identical to V2N's shipped prediction for that file
+(onset F1 ours vs shipped = **100 %**), and 94.3 % onset F1 vs GT (paper, whole test set: 94.7 %). So the wrapper
+reproduces V2N exactly, and whatever it does on guitar is V2N's behaviour, not a bug in our input path.
+
+**Result on guitar** (run `2026-11-24_cp7_v2n_masked`, masked subset, 74 clips):
+
+| system | note F1@50 | timing F1 | frame F1 | chroma sim | onset corr | notes/clip |
+|---|---|---|---|---|---|---|
+| real audio (ceiling) | 93.6 | 95.4 | 82.8 | 0.892 | 0.903 | 32.8 |
+| MMAudio, video only | 3.1 | 35.5 | 10.3 | 0.205 | 0.111 | 33.6 |
+| **V2N zero-shot** | **0.0** | **0.0** | **0.0** | 0.000 | −0.001 | **0.0** |
+| silence | 0.0 | 0.0 | 0.0 | 0.000 | 0.000 | 0.0 |
+
+V2N predicts **one note in 74 clips** (73 clips empty), so on every metric it equals the silence baseline.
+
+**Is there a signal below the threshold?** No. The onset probabilities stay around 1e-3 (max 0.50 in one clip),
+as static horizontal bands at low piano pitches that do not change when notes are played (see the log-scale panel
+in `plots/v2n/*.png`). Threshold-free check: correlation of V2N's per-frame max onset probability with GT onset
+times is r = −0.026 for the matched clip vs −0.022 for a different piece (matched better on 47 % of clips,
+Wilcoxon p = 0.67). So V2N carries no timing information about guitar, and lowering the threshold would only add
+random notes.
+
+**Why (interpretation).** V2N was trained on one fixed top-down camera over one piano. The S2S slope prior and
+all heads assume a keyboard: white/black key pattern, fingers pressing down into the keys, a 100 px margin below the
+keys. A fretboard strip (frets as thin vertical lines, strings horizontal, the fretting hand often from above, motion
+blur) is far out of its training distribution, and the model answers "no key pressed". This matches V2N's own
+cross-dataset result (transfer collapses when the geometry differs). Nut-left orientation was a deliberate choice
+(low pitches left, as on the keyboard); other orientations were not tried, because with no timing signal at all a
+flip cannot create one.
+
+**Takeaway for the thesis.** Neither existing route works on guitar video: V2A (MMAudio) gets rhythm weakly
+(timing F1 35.5 vs chance ~27) but almost no pitch (note F1 3.1 vs chance 2.1); the closest visual transcription
+model (V2N) outputs silence. This motivates CP8 (fine-tune V2N on guitar) and the guitar-specific pipeline.
+
+**Open (Luckey, 2026-11-24): the 0.0 result does not look right yet — to be re-examined before CP7 is
+finalised.** Things to check then (none done yet):
+- Strip geometry vs V2N's piano crop: V2N's crops include a 100 px margin below the keys (hands come from there);
+  ours put the neck in the middle 50 % of the height. Try a crop/orientation closer to the piano layout
+  (e.g. horizontal flip, vertical flip, neck in the top part) on a few clips and see if the probabilities move at all.
+- Check the input statistics (brightness/contrast) of our strips against PianoVAM strips.
+- Lower decoding thresholds only as a diagnostic (not for the table), to see whether any timing structure appears.
+- If V2N still stays silent, keep 0.0 as the zero-shot result; the positive control already rules out a wrapper bug.
+
+Next step after that: CP8 draft plan in [2026-11-24_v2n_guitar_adaptation_plan.md](2026-11-24_v2n_guitar_adaptation_plan.md)
+(train the V2N architecture on GAPS guitar strips; the released V2N uses no pretrained foundation model — its
+ResNet-18 is trained from scratch on piano — but the code has an ImageNet-22k ConvNeXt-T option).

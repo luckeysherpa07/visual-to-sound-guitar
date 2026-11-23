@@ -61,7 +61,7 @@ Each checkpoint ends with something you can **see** and a short stop where you c
 
 ### CP6 — V2N zero-shot (video → MIDI directly, piano-trained)
 - Separate env `v2n`; run the public checkpoints (github.com/yonghyunk1m/V2N) on the strips. Output MIDI is scored directly (no transcription step).
-- Code: `scripts/30g_run_v2n.sh`.
+- Code: `scripts/30g_run_v2n.py` (+ positive control `scripts/30g_check_v2n_piano.py`).
 - **You see:** V2N's predicted piano roll next to the GT roll for 3 clips.
 
 ### CP7 — Results table ("how bad")

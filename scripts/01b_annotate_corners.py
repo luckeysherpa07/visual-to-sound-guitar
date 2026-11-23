@@ -10,6 +10,8 @@ Records always store the nut + fret-20 `corners`; the raw `clicks` and
 `clicked_fret` are kept for traceability.
 
 Keys:  enter/space = accept   u = undo click   r = reset   f = toggle fret 12 / 20
+       p = paste the previous accepted clicks (check the grid, then enter; useful for consecutive
+           clips of the same static-camera video, use with --no-shuffle)
        s = skip (fretboard not usable, saved as visible=false)   q = quit
 Progress is appended to the output file, so you can stop and resume.
 Over SSH (no desktop window reaches you) add --web and open http://localhost:8765/;
@@ -43,6 +45,7 @@ DATA_ROOT = Path("data")
 MAX_W, MAX_H = 1600, 900
 FRET_CHOICES = (12, 20)
 MODE = {"fret": 12}  # far fret clicked; persists across frames, toggled with f
+LAST: dict = {}  # last accepted clicks + fret, for the p (paste) key
 
 
 def prompts(fret: int) -> list[str]:
@@ -73,7 +76,8 @@ def build_queue(args) -> list[dict]:
     else:
         for p in sorted(Path().glob(args.image_glob)):
             items.append(dict(path=p, source=args.source, clip_id=p.parent.name))
-    rng.shuffle(items)
+    if not args.no_shuffle:
+        rng.shuffle(items)
     return items[: args.limit] if args.limit else items
 
 
@@ -146,7 +150,7 @@ def annotate(img: np.ndarray, title: str) -> dict | None | str:
                         cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2)
         view = cv2.resize(view, None, fx=scale, fy=scale)
         if len(pts) < 4:
-            msg = prompts(fret)[len(pts)]
+            msg = prompts(fret)[len(pts)] + ("  (p = paste previous)" if LAST and not pts else "")
         else:
             msg = "enter=accept  u=undo  r=reset" if valid else "INVALID (crossed) - u=undo r=reset"
         cv2.putText(view, msg + f"   [f=fret {fret}->{32 - fret} s=skip q=quit]", (10, 30),
@@ -164,7 +168,11 @@ def annotate(img: np.ndarray, title: str) -> dict | None | str:
             pts.clear()
         if key == ord("f"):
             MODE["fret"] = 32 - fret  # 12 <-> 20
+        if key == ord("p") and LAST:
+            pts[:] = [tuple(p) for p in LAST["clicks"]]
+            MODE["fret"] = LAST["fret"]
         if key in (13, 32) and valid:
+            LAST.update(clicks=[list(p) for p in pts], fret=fret)
             return dict(corners=corners.tolist(), clicks=[list(p) for p in pts], fret=fret)
 
 
@@ -177,6 +185,7 @@ def main():
     ap.add_argument("--per-clip", type=int, default=1)
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--no-shuffle", action="store_true", help="keep sorted order (e.g. clips of one video in a row)")
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--web", type=int, nargs="?", const=8765, default=0, metavar="PORT",
                     help="annotate in the browser instead of an OpenCV window (for SSH; default port 8765)")
@@ -185,7 +194,11 @@ def main():
     args.out.parent.mkdir(parents=True, exist_ok=True)
     done = set()
     if args.out.exists():
-        done = {json.loads(l)["image"] for l in args.out.read_text().splitlines() if l.strip()}
+        records = [json.loads(l) for l in args.out.read_text().splitlines() if l.strip()]
+        done = {r["image"] for r in records}
+        accepted = [r for r in records if r.get("clicks")]
+        if accepted:  # resume: p pastes the last accepted clicks of the previous session
+            LAST.update(clicks=accepted[-1]["clicks"], fret=accepted[-1]["clicked_fret"])
 
     queue = [it for it in build_queue(args) if str(it["path"].relative_to(DATA_ROOT)) not in done]
     print(f"{len(done)} done, {len(queue)} to annotate")
@@ -233,7 +246,7 @@ WEB_PAGE = r"""<!doctype html>
 </style></head><body>
 <div id="bar"><span id="prog"></span><span id="mode"></span><span id="prompt"></span><span id="bad"></span>
 <span style="margin-left:auto"><kbd>Enter</kbd>/<kbd>Space</kbd> accept · <kbd>u</kbd> undo ·
-<kbd>r</kbd> reset · <kbd>f</kbd> fret 12/20 · <kbd>s</kbd> skip (unusable)</span></div>
+<kbd>r</kbd> reset · <kbd>f</kbd> fret 12/20 · <kbd>p</kbd> paste previous · <kbd>s</kbd> skip (unusable)</span></div>
 <canvas id="c"></canvas>
 <script>
 const PROMPTS=f=>["1: nut / high-E","2: nut / low-E",`3: fret ${f} / high-E`,`4: fret ${f} / low-E`];
@@ -274,6 +287,7 @@ addEventListener('keydown',e=>{if(!item||busy)return;
   if(e.key=='u'&&pts.length){pts.pop();update();}
   else if(e.key=='r'){pts=[];update();}
   else if(e.key=='f'){fret=32-fret;update();}
+  else if(e.key=='p'&&item.last){pts=item.last.clicks.map(p=>[p[0],p[1]]);fret=item.last.fret;update();}
   else if(e.key=='s')save(null);
   else if((e.key=='Enter'||e.key==' ')&&valid){e.preventDefault();save(pts);}});
 addEventListener('resize',()=>{fit();draw()});
@@ -314,8 +328,9 @@ def serve_web(queue: list[dict], out: Path, n_done: int, port: int) -> None:
                     i = current()
                     if i is None:
                         return self.send_json(dict(finished=True, done=state["done"]))
-                    return self.send_json(dict(index=i, position=i + 1, total=len(queue),
-                                               done=state["done"], name=queue[i]["path"].name))
+                    return self.send_json(dict(index=i, position=i + 1, total=len(queue), done=state["done"],
+                                               name=f"{queue[i]['clip_id']}/{queue[i]['path'].name}",
+                                               last=dict(LAST) or None))
             if self.path.startswith("/img/"):
                 i = int(self.path[5:].split("?")[0])
                 return self.send(queue[i]["path"].read_bytes(), "image/png")
@@ -341,6 +356,7 @@ def serve_web(queue: list[dict], out: Path, n_done: int, port: int) -> None:
                         if corners is None:
                             return self.send_json(dict(ok=False))
                         ann = dict(corners=corners.tolist(), clicks=body["clicks"], fret=fret)
+                        LAST.update(clicks=body["clicks"], fret=fret)
                     it = queue[i]
                     img = cv2.imread(str(it["path"]))
                     if img is not None:

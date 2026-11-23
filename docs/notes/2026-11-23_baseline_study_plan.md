@@ -52,7 +52,9 @@ Each checkpoint ends with something you can **see** and a short stop where you c
 - Click 4 corners (nut + fret 12) on one frame per clip with the existing `scripts/01b_annotate_corners.py`
   → homography (`fretboard_grid.corners_from_clicks`) → 800×144 grayscale strip, same as V2N's input. One warp per
   8 s clip (static GAPS cameras). Fair, exact crop, so V2N's failure comes from piano→guitar, not from bad cropping.
-  The clicks also become GAPS training frames for the FPE later.
+  ~~The clicks also become GAPS training frames for the FPE later.~~ Corrected Nov 23: these are GAPS *test*
+  clips, so their clicks are evaluation-only (FPE training on them would leak into the test evaluation).
+  Added Nov 23: corners are tracked through each clip (zoom/pan/guitar movement/cuts), see the progress log.
   (GuiFiR FPE crop not possible yet: no released weights, our FPE untrained, no neck detector for GAPS.)
 - Code: `src/guitar2midi/baselines/strips.py`, `scripts/30f_make_v2n_strips.py` → `data/interim/baseline_clips/strips/`.
 - **You see:** a grid of all warped strips (one frame each), to check every crop before running V2N.

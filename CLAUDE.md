@@ -33,7 +33,7 @@ Supervisor's request: before going into GuiFiR detail, get a bird's-eye view of 
 | 2 | Eval clips: silent video + real audio + GT MIDI per clip, sync check | `clips.csv`, contact sheet, 3 piano rolls | done (Nov 23): 90 clips (30 pieces × 3 × 8 s, 25 fps), median 31 notes/clip. GAPS audio/MIDI lag the video's audio by a constant 0–49 ms per piece (codec priming); corrected, residual < 0.1 ms. Contact sheet 3 frames/clip; no-guitar clips fixed (`--reject` redraws, `--set` manual windows for slideshow-style `358_441wc` and `208_c41wc_c1`), still 90 clips |
 | 3 | Transcription ceiling on real audio (GAPS authors' model) + metrics code | ceiling F1 ≈ GAPS paper level | done (Nov 23): onset F1@50 ms **93.5 %** (paper: 93.4–94.3), frame F1 83.0, median per clip 95.0, min 67.7. Checkpoint `guitar-gaps-paper-version-12200_iterations.pth` (env `amt`), used for all systems |
 | 4 | MMAudio on all clips, no prompt and "solo classical guitar" | ~5 videos with generated audio | done (Nov 23): large_44k_v2, seed 42, 90 × 2 clips in ~9 min (env `mmaudio`). Output looks like plucked strings with plausible rhythm, pitches mostly off (spectrograms). No leakage: clips have no audio stream; 0/300 GAPS videos in VGGSound |
-| 5 | Fretboard strips for V2N: click nut + fret 12 per clip → homography → 800×144 strip | grid of all strips | todo |
+| 5 | Fretboard strips for V2N: cut detection, click nut + fret 12 on one frame per clip, **track the corners through the clip**, warp to 800×144 strips | tracking sheet (3 frames + strips per clip) | in progress: tracking + tools built and tested (Nov 23); waiting for clicks. 12/90 clips have hard cuts (click frame = middle of longest shot) |
 | 6 | V2N zero-shot on the strips (public checkpoints) | predicted vs GT piano roll | todo |
 | 7 | Results table: ceiling / MMAudio ± prompt / V2N zero-shot / shuffled video / silence | table + summary for supervisor | MMAudio part done (Nov 23): note F1 **3.3 %** vs ceiling 93.5 % (chance 2.1 %); timing F1 35.9 vs chance ~27 (significant); chroma = chance; prompt no effect. V2N rows after CP6 |
 | 8 | V2N fine-tuning pilot: guitar heads, GAPS train strips (1 click set per video); full fine-tune vs scratch (LoRA optional) | curves + table rows | todo |
@@ -57,6 +57,7 @@ video ─► fretboard landmarks ─► homography ─► temporal smoothing ─
    - Labels: the public GuiFiR release is GuiFiR-Vid only (clips, tablature, detector neck boxes; 4 corners `lt/lb/rt/rb` only on val 543 / test 2,048 frames, in 640×360 coords). **GuiFiR-Synth (126-point labels) is not released.** So we click 4 corners per frame (`scripts/01b_annotate_corners.py`) on ~1 frame per GuiFiR-Vid train clip plus GAPS train-split frames, and generate the 126 points from the corners with the fret formula d_n ∝ 1 − 2^(−n/12) plus a homography. Crossed/concave corner sets are rejected (`corners_valid`).
    - Annotation clicks: by default the 3rd/4th clicks go on **fret 12** (double-dot marker, nearly always visible; on classical guitars the neck/body joint, and classical guitars often have only 19 frets). Fret 20 is extrapolated with the same fret formula + homography (`fretboard_grid.corners_from_clicks`), so it is exact up to click noise. Key `f` switches to clicking fret 20 directly. Records always store nut + fret-20 `corners`, plus the raw `clicks` and `clicked_fret` for traceability.
    - Annotation UI: OpenCV window (kept on top under X11 via `python-xlib`, `pip install -e .[annotate]`), or `--web [PORT]` (default 8765) for SSH: a local browser page at http://localhost:8765/ with the same keys; VS Code forwards the port.
+   - Annotation tool extras: `--no-shuffle` keeps sorted order; key `p` pastes the previous accepted clicks (also after resuming), for consecutive clips of one static-camera video.
    - Splits: train = our annotations; val = GuiFiR val corners; test = GuiFiR test corners (held out). Report FCD (mean corner error, px at 640×360) as in the paper.
    - GuiFiR corner mapping **verified** (Nov 16): `lt/lb/rt/rb` are image sides and the player faces the camera, so the **nut is on the image right**. Our order (nut/high-E, nut/low-E, f20/high-E, f20/low-E) = `rb, rt, lb, lt`. Evidence: fretting hand in the right half in all 1,483 low-fret val/test frames, right side narrower, overlays align.
    - GuiFiR frames: annotation names `<clip>/<clip>_NNN.png` are 0-based native-fps frame indices. The official `extract_frames.py` names frames differently and extracts everything (~300k PNGs), so `01a` uses `guifir.extract_annotated_frames` instead (~11 GB). 63 annotated frames have an index past the clip end (train 2, val 4, test 57; listed in `frames/missing.txt`) and are skipped → val 539, test 1,991 usable frames.
@@ -127,7 +128,8 @@ Secondary references for fretboard tracking:
 | Evaluate only on real MIDI | Nov 13 | Pseudo-labels (magcil) would make test numbers meaningless. |
 | Baseline study of existing models before more FPE work; GuiFiR resumes afterwards, including hand pose | Nov 23 | Supervisor: get a bird's-eye view of how bad existing video→audio/MIDI models are on guitar first; this is also the thesis motivation. |
 | Score V2A models via audio transcription, with the real-audio transcription as ceiling | Nov 23 | V2A models output audio, not MIDI; the ceiling separates V2A error from transcription error. |
-| V2N zero-shot uses strips from manually clicked corners | Nov 23 | Exact, fair crop so V2N's failure is due to piano→guitar, not cropping; FPE not trained yet; clicks reusable as FPE training data. |
+| V2N zero-shot uses strips from manually clicked corners, tracked through each clip | Nov 23 | Exact, fair crop so V2N's failure is due to piano→guitar, not cropping; FPE not trained yet. Tracking because GAPS has zoom/pan, players moving the guitar and cuts: one fixed crop per clip would let the fretboard slide out of the strip. First version of Stage 1 steps 2–4. |
+| Corner clicks on GAPS **test** clips are evaluation-only, never FPE training data | Nov 23 | Training the FPE on test frames would leak into the GAPS test evaluation. Stored as `gaps_test_baseline_EVAL_ONLY.jsonl`. Only CP8 clicks (GAPS train split) may become FPE training data. |
 | V2N on guitar: full fine-tune vs scratch; LoRA only as optional ablation | Nov 23 | V2N is small (ResNet-18 + conv blocks + BiLSTM, no attention) and fits 16 GB; LoRA saves little and suits conv/LSTM layers poorly; heads must be replaced anyway. |
 
 ## Evaluation
@@ -185,12 +187,15 @@ src/guitar2midi/   importable package: data, preprocessing, model, training, dec
   baselines/clips.py                eval clips for the baseline study: window selection, cutting, sync measurement + correction, contact sheet, piano-roll plot
   preprocessing/fretboard_grid.py   126-point grid from 4 corners, corners_valid, draw_grid
   preprocessing/fpe_inference.py    FretboardPoseEstimator.predict(image, boxes) -> (N, 126, 2)
+  preprocessing/video.py            read_frames, detect_cuts (colour-histogram drop or pixel-difference jump), shots
+  preprocessing/fretboard_tracking.py  track_corners (masked LK flow + RANSAC homography, hold last good, smoothing), warp_strip (800×144, nut left)
 scripts/       thin numbered entry points
   done:    setup_mmpose.sh, 01a_prepare_guifir.sh, 01b_annotate_corners.py, 01c_build_fretboard_coco.py,
            01d_train_fpe.py, 01e_eval_fpe.py
   planned: 00_audit_gaps, 02_warp_strips, 03_make_labels, 04_make_splits, 10_train, 20_evaluate
   baseline study: done 30a_download_gaps (--split test|train, --no-audio, --no-videos), 30b_make_eval_clips (→ data/interim/baseline_clips/), 30c_run_mmaudio (env mmaudio), 30c_plot_spectrograms, 30d_transcribe (env amt), 30e_evaluate_baselines (→ outputs/runs/);
-           planned 30f_make_v2n_strips, 30g_run_v2n.sh, 30h_finetune_v2n
+           30f_prepare_strip_frames (cuts + frames to click), 30f_make_v2n_strips (tracking + strips);
+           planned 30g_run_v2n.sh, 30h_finetune_v2n
 notebooks/     exploration only, numbered
 outputs/       (gitignored) runs/<YYYY-MM-DD>_<name>/ (mmengine work_dir: merged config, checkpoints, logs)
 tests/         unit tests (test_fretboard_grid.py: grid geometry, weights, metainfo matches grid module; test_note_metrics.py: metric sanity)

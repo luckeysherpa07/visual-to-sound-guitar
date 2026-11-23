@@ -283,3 +283,50 @@ better on 73 % of clips), onset corr 0.11 vs 0.00 (p = 2e-5), chroma 0.198 vs 0.
 
 **Outputs (local):** `outputs/runs/2026-11-23_cp7_mmaudio/{summary.md, summary.csv, per_clip.csv}`,
 transcriptions in `data/interim/baseline_clips/transcriptions/mmaudio_{noprompt,prompt}/`.
+
+---
+
+## CP5 — Fretboard strips for V2N (in progress, 2026-11-23)
+
+**Goal:** turn each GAPS clip into V2N's input format: a rectified grayscale 800×144 strip of the fretboard
+(V2N uses the keyboard), so the piano model can be run zero-shot in CP6. Dataset: the same 90 GAPS test clips;
+from V2N only the trained model is used.
+
+**Why tracking was added (decided 2026-11-23).** The plan was one set of clicked corners per clip, i.e. one
+fixed crop. That assumes nothing moves, but in GAPS (contact sheet, CP2):
+- many videos are edited productions with camera **zoom and pan**,
+- players **move the guitar** even with a static camera,
+- some clips contain **hard cuts** to another camera angle.
+With a fixed crop the fretboard slides out of the strip during the clip, and V2N would partly fail because of
+bad cropping instead of because it is a piano model, so the comparison would be unfair. Solution: click once,
+then track the corners automatically through the clip. Clicking effort stays the same (one frame per clip),
+it covers every kind of movement, and it is a first version of Stage 1 steps 2–4 of the main pipeline
+(homography, temporal smoothing, "reuse last good warp"), so it is not throw-away work.
+
+**How it works**
+1. `scripts/30f_prepare_strip_frames.py`: hard-cut detection per clip (colour-histogram drop *or* pixel-difference
+   jump > 6× the clip's normal motion); the frame to click is the middle of the longest shot.
+   Result: **12 of 90 clips have hard cuts** (`027_Zpswc_c3`, `051_rc1wc_c1/c3`, `104_xf1wc_c3`, `222_W41wc_c1/c3`,
+   `291_3Sswc_c1/c2/c3`, `354_-k1wc_c1/c2/c3`); in these the longest shot covers 42–85 % of the clip.
+   Slow dissolves (e.g. `201_gk1wc_c2`) are not detected as cuts; the tracker quality check flags them.
+2. Clicking with the existing tool (`01b_annotate_corners.py`), new: `--no-shuffle` (a video's clips in a row)
+   and key `p` = paste the previous clip's clicks (static cameras: 1 s instead of ~10 s per clip).
+3. `scripts/30f_make_v2n_strips.py` with `preprocessing/fretboard_tracking.py`: from the clicked frame, forward and
+   backward through its shot: features in the neck area (frets, strings, wood) → Lucas-Kanade optical flow with
+   forward-backward check → RANSAC homography (ignores the moving hands) → corners moved; if the neck is lost
+   (< 15 inliers, invalid quad, > 25 % area jump) the last good corners are held. Corners smoothed over 5 frames.
+   Frames outside the clicked shot get a black strip. Warp: nut left, fret 20 right, high-E on top, neck in the
+   middle half of the strip height (fingers above/below remain visible).
+4. Check: `tracking_sheet.jpg` shows per clip 3 frames with the tracked neck (green = tracked, red = held) and the
+   3 strips. Clips with < 90 % tracked frames are flagged. Unusable clips (fretboard not visible) are skipped in
+   the tool; V2N and MMAudio are then compared on the same subset.
+
+**Tests:** synthetic textured neck under zoom + pan + rotation is tracked with < 2 px error from a middle frame;
+a cut stops the tracking (19 unit tests pass).
+
+**Important correction:** these clicks are on GAPS **test** clips, so they are evaluation-only and must never be
+used to train the fretboard estimator (that would leak into the GAPS test evaluation). They are stored in
+`data/labels/fretboard_corners/gaps_test_baseline_EVAL_ONLY.jsonl`. (The plan originally said they could be
+reused as training data; that was wrong. Only the CP8 clicks on the GAPS train split can.)
+
+**Next:** click the 90 frames, then run `30f_make_v2n_strips.py` and check the tracking sheet.

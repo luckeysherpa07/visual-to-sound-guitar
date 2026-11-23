@@ -1,0 +1,17 @@
+# MMAudio env for the baseline study (CP4): open-domain video-to-audio (Cheng et al., CVPR 2025).
+# Separate from guitar2midi because MMAudio needs torch >= 2.5 (breaks the pinned mmcv/torch 2.1.2).
+#   conda env create -f envs/mmaudio.yml && conda activate mmaudio && pip install -e . --no-deps
+# Weights (large_44k_v2 + VAE, BigVGAN, Synchformer, ~5 GB) download to ~/.cache/mmaudio on first use.
+name: mmaudio
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - ffmpeg
+  - pip:
+      - torch
+      - torchvision
+      - torchaudio
+      - mmaudio @ git+https://github.com/hkchengrex/MMAudio.git@974010a026c731054592d8f777218bd9d85a6c24
+      - soundfile

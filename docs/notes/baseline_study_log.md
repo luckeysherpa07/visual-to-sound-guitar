@@ -181,3 +181,46 @@ GT: 34.9 notes per clip on average.
 
 **Outputs:** `data/interim/baseline_clips/transcriptions/{real_audio, real_audio_defaultckpt}/` (local),
 `outputs/runs/2026-11-23_cp3_ceiling/{per_clip.csv, summary.csv, summary.md, args.json}` (local).
+
+---
+
+## CP4 — MMAudio on the guitar clips (2026-11-23)
+
+**Commands**
+
+```bash
+conda activate mmaudio                 # conda env create -f envs/mmaudio.yml; pip install -e . --no-deps
+python scripts/30c_run_mmaudio.py
+conda activate guitar2midi
+python scripts/30c_plot_spectrograms.py
+```
+
+**Model:** MMAudio `large_44k_v2` (Cheng et al., CVPR 2025), code @ `974010a`, settings of the official demo
+(25 Euler steps, CFG 4.5, bf16), seed 42 for every clip. Own env `mmaudio` (torch 2.15). Weights 5.9 GB in
+`~/.cache/mmaudio` (+ BigVGAN in the HF cache).
+
+**Systems**
+- `mmaudio_noprompt`: silent video only.
+- `mmaudio_prompt`: silent video + text "solo classical guitar".
+
+**Result**
+- 90 clips × 2 systems generated in ~9 min (~3 s per clip on the RTX 4080).
+- Listening examples (silent clip + real / generated audio): `data/interim/baseline_clips/examples/<clip>__{real,mmaudio_noprompt,mmaudio_prompt}.mp4`
+  for `019_Vpswc_c1`, `100_Lf1wc_c1`, `142_GD1wc_c1`, `235_Ny1wc_c1`, `303_5N1wc_c1`.
+- Spectrograms real vs generated with GT notes overlaid: `examples/<clip>__spectrograms.png`.
+
+**What we see (spectrograms, before any numbers)**
+- Generated audio looks like plucked strings: sharp attacks and harmonic overtones, not noise or speech.
+- Rhythm is partly right: in `100_Lf1wc_c1` the strong attacks at ~2.0, 3.0, 5.1, 6.2 s match the real recording,
+  so MMAudio picks up the picking motion from the video.
+- Pitches mostly do not follow the GT notes. The prompt changes little.
+- To be quantified in CP7 (onset F1, chroma similarity, onset correlation).
+
+**Leakage checks**
+- 0/90 silent clips contain an audio stream.
+- 0/300 GAPS YouTube IDs (train + test) are in VGGSound (MMAudio's audio-visual training set), so MMAudio has not
+  seen these performances with their sound. (MMAudio's audio-text data, e.g. AudioSet captions, has no video conditioning.)
+
+**Caveats**
+- MMAudio reads our 8.00 s clips as 7.96 s (one frame), so the last 40 ms have no generated audio (same for every clip, negligible).
+- MMAudio's sync encoder center-crops frames to a square: on wide shots the hands can be partly outside it.

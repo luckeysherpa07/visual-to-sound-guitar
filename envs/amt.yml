@@ -1,0 +1,15 @@
+# Audio-to-MIDI transcription env for the baseline study (CP3, CP7).
+# Separate from guitar2midi because hf-midi-transcription pulls torch 2.14 (breaks the pinned mmcv/torch 2.1.2).
+#   conda env create -f envs/amt.yml
+# Model: GAPS benchmark guitar model (Riley et al. 2024), checkpoint guitar-gaps.pth from
+# HF xavriley/midi-transcription-models (downloaded automatically on first use).
+name: amt
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - ffmpeg
+  - pip:
+      - hf-midi-transcription @ git+https://github.com/xavriley/hf_midi_transcription.git@96f6797881e9497cbfc8f8e5deccea9c1f2f7adc
+      - pretty_midi

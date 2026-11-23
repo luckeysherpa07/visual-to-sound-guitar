@@ -136,3 +136,48 @@ end; `--frames-per-clip`), which also reveals camera cuts and non-guitar shots i
 
 **Outputs (local):** `data/interim/baseline_clips/{clips.csv, contact_sheet.jpg, rejected_windows.txt, manual_windows.txt, video/, audio/, midi/, plots/}`
 (plots: `019_Vpswc_c1`, `118_VD1wc_c1`, `263_cw1wc_c1`).
+
+---
+
+## CP3 — Transcription ceiling (2026-11-23)
+
+**Why:** V2A models output audio, so their notes are measured by transcribing that audio. The transcription model
+makes mistakes too; running it on the *real* audio gives the best score possible (ceiling). Any gap between the
+ceiling and a V2A system is the V2A model's fault. It also checks that audio ↔ MIDI alignment of our clips is right.
+
+**Commands**
+
+```bash
+conda activate amt                     # separate env: conda env create -f envs/amt.yml; pip install -e . --no-deps
+python scripts/30d_transcribe.py --system real_audio
+conda activate guitar2midi
+python scripts/30e_evaluate_baselines.py --run-name cp3_ceiling
+```
+
+**Model:** GAPS benchmark model (Riley et al. 2024; Kong et al. high-resolution CRNN), code
+github.com/xavriley/hf_midi_transcription @ `96f6797`, weights HF `xavriley/midi-transcription-models`. Own env
+`amt` because the package needs a recent torch (2.15 installed), which would break mmcv in `guitar2midi`.
+Two GAPS checkpoints compared; `guitar-gaps-paper-version-12200_iterations.pth` chosen and used for all systems.
+
+**Metrics** (`src/guitar2midi/evaluation/note_metrics.py`, unit-tested; mean over 90 clips):
+onset P/R/F1 at 50 and 100 ms (mir_eval, onsets only; main metric as in GAPS and V2N), onset+offset F1, frame F1
+at 25 fps, chroma similarity (pitch-class agreement per frame), onset correlation (rhythm agreement, ignores pitch).
+
+**Result**
+
+| system | onset F1@50 | P | R | F1@100 | onset+offset F1 | frame F1 | chroma sim | onset corr | notes/clip |
+|---|---|---|---|---|---|---|---|---|---|
+| real audio, paper ckpt (**ceiling**) | **93.5** | 93.5 | 93.8 | 93.7 | 63.6 | 83.0 | 0.894 | 0.905 | 35.1 |
+| real audio, default ckpt | 93.5 | 94.3 | 93.0 | 93.6 | 56.4 | 80.8 | 0.872 | 0.910 | 34.3 |
+| silence | 0.0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+
+GT: 34.9 notes per clip on average.
+
+**What we learned**
+- Ceiling onset F1 93.5 % matches the GAPS paper (Table 6: 93.4–94.3 %) → model, clip cutting and audio/MIDI alignment are correct.
+- Per clip: median 95.0 %, worst 67.7 % (`051_rc1wc_c3`); no broken clip.
+- Onset+offset F1 is much lower (64 %): guitar note ends are ambiguous even from audio (relevant for the offset-head question).
+- Transcription of 90 clips takes ~15 s on the RTX 4080.
+
+**Outputs:** `data/interim/baseline_clips/transcriptions/{real_audio, real_audio_defaultckpt}/` (local),
+`outputs/runs/2026-11-23_cp3_ceiling/{per_clip.csv, summary.csv, summary.md, args.json}` (local).

@@ -31,7 +31,7 @@ Supervisor's request: before going into GuiFiR detail, get a bird's-eye view of 
 | 0 | Save plan in CLAUDE.md + `docs/notes/` | CLAUDE.md diff | done |
 | 1 | GAPS data: metadata, audio, MIDI from HF `xavriley/GAPS` v1.1 (not the v1 zip: case-clashing names), test videos (yt-dlp) | summary: pieces, videos ok/missing, hours | done (Nov 23): test 30/30 pieces, 27 performers, 1.77 h, all videos available; audio and video lengths match within 0.1 s; fps 23.976–30, mostly 720p (one 320×240: `201_gk1wc`) |
 | 2 | Eval clips: silent video + real audio + GT MIDI per clip, sync check | `clips.csv`, contact sheet, 3 piano rolls | done (Nov 23): 90 clips (30 pieces × 3 × 8 s, 25 fps), median 31 notes/clip. GAPS audio/MIDI lag the video's audio by a constant 0–49 ms per piece (codec priming); corrected, residual < 0.1 ms. Contact sheet 3 frames/clip; no-guitar clips fixed (`--reject` redraws, `--set` manual windows for slideshow-style `358_441wc` and `208_c41wc_c1`), still 90 clips |
-| 3 | Transcription ceiling on real audio (GAPS authors' model, fallback basic-pitch) + metrics code | ceiling F1 ≈ GAPS paper level | todo |
+| 3 | Transcription ceiling on real audio (GAPS authors' model) + metrics code | ceiling F1 ≈ GAPS paper level | done (Nov 23): onset F1@50 ms **93.5 %** (paper: 93.4–94.3), frame F1 83.0, median per clip 95.0, min 67.7. Checkpoint `guitar-gaps-paper-version-12200_iterations.pth` (env `amt`), used for all systems |
 | 4 | MMAudio on all clips, no prompt and "solo classical guitar" | ~5 videos with generated audio | todo |
 | 5 | Fretboard strips for V2N: click nut + fret 12 per clip → homography → 800×144 strip | grid of all strips | todo |
 | 6 | V2N zero-shot on the strips (public checkpoints) | predicted vs GT piano roll | todo |
@@ -178,6 +178,8 @@ data/          (gitignored) raw/{gaps,magcil,guifir,own} → interim/{landmarks,
 src/guitar2midi/   importable package: data, preprocessing, model, training, decoding, evaluation, utils
   data/guifir.py                    GuiFiR-Vid reader (frames, neck boxes, GT corners, lt/lb/rt/rb mapping, extract_annotated_frames)
   data/gaps.py                      GAPS v1.1 reader/downloader: metadata+splits, audio/MIDI (HF), videos (yt-dlp) → data/raw/gaps/{audio,midi,videos}/<id>.*
+  baselines/transcribe.py           audio→MIDI with the GAPS benchmark model (env amt only)
+  evaluation/note_metrics.py        onset F1 @50/100 ms, onset+offset F1, frame F1 (25 fps), chroma similarity, onset correlation (mir_eval)
   baselines/clips.py                eval clips for the baseline study: window selection, cutting, sync measurement + correction, contact sheet, piano-roll plot
   preprocessing/fretboard_grid.py   126-point grid from 4 corners, corners_valid, draw_grid
   preprocessing/fpe_inference.py    FretboardPoseEstimator.predict(image, boxes) -> (N, 126, 2)
@@ -185,17 +187,19 @@ scripts/       thin numbered entry points
   done:    setup_mmpose.sh, 01a_prepare_guifir.sh, 01b_annotate_corners.py, 01c_build_fretboard_coco.py,
            01d_train_fpe.py, 01e_eval_fpe.py
   planned: 00_audit_gaps, 02_warp_strips, 03_make_labels, 04_make_splits, 10_train, 20_evaluate
-  baseline study: done 30a_download_gaps (--split test|train, --no-audio, --no-videos), 30b_make_eval_clips (→ data/interim/baseline_clips/); planned 30c_run_mmaudio.sh, 30d_transcribe,
+  baseline study: done 30a_download_gaps (--split test|train, --no-audio, --no-videos), 30b_make_eval_clips (→ data/interim/baseline_clips/), 30d_transcribe (env amt), 30e_evaluate_baselines (→ outputs/runs/); planned 30c_run_mmaudio.sh, 30d_transcribe,
            30e_evaluate_baselines, 30f_make_v2n_strips, 30g_run_v2n.sh, 30h_finetune_v2n
 notebooks/     exploration only, numbered
 outputs/       (gitignored) runs/<YYYY-MM-DD>_<name>/ (mmengine work_dir: merged config, checkpoints, logs)
-tests/         unit tests (test_fretboard_grid.py: grid geometry, weights, metainfo matches grid module)
+tests/         unit tests (test_fretboard_grid.py: grid geometry, weights, metainfo matches grid module; test_note_metrics.py: metric sanity)
+envs/          extra conda envs for external models (amt.yml)
 docs/papers/   reference PDFs; docs/notes/ protocol, audit results, meeting notes
 thesis/        LaTeX source (main.tex, chapters/, figures/, tables/; build/ gitignored)
 ```
 
 Environment (Miniforge installed at `~/miniforge3`, env `guitar2midi`, Python 3.10):
 `conda env create -f environment.yml && conda activate guitar2midi && bash scripts/setup_mmpose.sh`.
+Second env `amt` (`conda env create -f envs/amt.yml`, then `pip install -e . --no-deps`): GAPS audio-to-MIDI model for the baseline study; separate because it needs torch ≥ 2.x latest (breaks mmcv). Scripts state which env they need.
 For the GuiFiR download also `pip install -e .[data]` (gdown, yt-dlp); for the corner annotation window `pip install -e .[annotate]` (python-xlib). Run tests with `python -m pytest tests/`.
 Pinned because MMPose is fragile: torch 2.1.2 + cu121, mmcv 2.1.0, mmengine 0.10.7, mmdet 3.3.0 (imported by mmpose heads), mmpose 1.3.2 with `--no-deps` (chumpy fails to build), numpy<2, setuptools<81 (mmengine needs `pkg_resources`).
 

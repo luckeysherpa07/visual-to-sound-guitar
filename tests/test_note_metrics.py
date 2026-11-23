@@ -63,3 +63,13 @@ def test_timing_merges_chords():
     chord = notes([(1.0, 2.0, 40), (1.01, 2.0, 47), (1.02, 2.0, 52), (3.0, 4.0, 60)])  # 2 plucks
     one_note_each = notes([(1.0, 2.0, 70), (3.0, 4.0, 70)])
     assert M.timing_prf(chord, one_note_each)[2] == pytest.approx(1.0)
+
+
+def test_valid_mask_ignores_masked_part():
+    est = REF[REF[:, 0] < 3.5]  # system predicts nothing after 3.5 s ...
+    valid = np.zeros(int(DUR * M.FPS), bool)
+    valid[: int(3.5 * M.FPS)] = True  # ... because there is no view there
+    m = M.evaluate(REF, est, DUR, valid=valid)
+    for k in ("onset_f50", "frame_f", "chroma_sim", "onset_corr"):
+        assert m[k] == pytest.approx(1.0), k
+    assert M.evaluate(REF, est, DUR)["onset_r50"] < 1.0

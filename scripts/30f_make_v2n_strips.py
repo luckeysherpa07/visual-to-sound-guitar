@@ -5,7 +5,10 @@
 Inputs: data/interim/baseline_clips/shots.json (from 30f_prepare_strip_frames.py) and the clicked corners
 data/labels/fretboard_corners/gaps_test_baseline_EVAL_ONLY.jsonl (from 01b_annotate_corners.py).
 Writes data/interim/baseline_clips/strips/
-    <clip>.npy           (T, 144, 800) uint8 grayscale strips at 25 fps; black where no corners (other shot)
+    <clip>.npy           (T, 144, 800) uint8 grayscale strips at 25 fps; black where not valid
+    <clip>_valid.npy     (T,) bool: frame has a correct fretboard view (inside the clicked shot and not listed
+                         in data/interim/baseline_clips/invalid_frames.txt, e.g. dissolves). Evaluation of the
+                         baseline is restricted to these frames (30e --mask-dir).
     strips.csv           per clip: coverage (share of frames tracked), lost frames, inliers, skipped
     tracking_sheet.jpg   per clip: 3 frames with the tracked neck (green = tracked, red = held) + their strips
 """
@@ -53,6 +56,13 @@ def main() -> None:
     args = p.parse_args()
 
     shots = json.loads((CLIPS / "shots.json").read_text())
+    invalid: dict[str, list[tuple[int, int]]] = {}
+    inv_file = CLIPS / "invalid_frames.txt"
+    if inv_file.exists():
+        for ln in inv_file.read_text().splitlines():
+            parts = ln.split("#")[0].split()
+            if len(parts) == 3:
+                invalid.setdefault(parts[0], []).append((int(parts[1]), int(parts[2])))
     anns = {}
     for line in args.annotations.read_text().splitlines():
         if line.strip():
@@ -70,11 +80,16 @@ def main() -> None:
         ref = int(re.search(r"f(\d+)\.png$", r["image"]).group(1))
         frames = read_frames(CLIPS / "video" / f"{cid}.mp4")
         corners, tracked, inliers = T.track_corners(frames, ref, np.array(r["corners"]), shot=tuple(shots[cid]["shot"]))
+        valid = ~np.isnan(corners[:, 0, 0])
+        for a0, b0 in invalid.get(cid, []):
+            valid[a0:b0 + 1] = False
+        corners[~valid] = np.nan  # black strip where the view is wrong
         strips = np.stack([T.warp_strip(f, c) for f, c in zip(frames, corners)])
         np.save(args.out / f"{cid}.npy", strips)
+        np.save(args.out / f"{cid}_valid.npy", valid)
         a, b = shots[cid]["shot"]
         in_shot = inliers[a:b][np.arange(a, b) != ref]
-        coverage = tracked.mean()
+        coverage = float((tracked & valid).mean())
         rows.append({"clip_id": cid, "skipped": 0, "n_frames": len(frames), "ref_frame": ref,
                      "shot_frames": b - a, "coverage": round(float(coverage), 3),
                      "lost_in_shot": int((~tracked[a:b]).sum()),

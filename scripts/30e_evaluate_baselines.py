@@ -12,6 +12,10 @@ them), plus the built-in "silence" (no notes). Only clips with keep=1 in clips.c
 system this shows whether the video matters at all; for real_audio it is the score of "real guitar music,
 wrong piece" (chance level for the metrics).
 
+--mask-dir DIR (e.g. data/interim/baseline_clips/strips): use only clips that have DIR/<clip>_valid.npy and
+score only notes/frames where it is True (camera cuts, dissolves). Applied to every system, so all are
+compared on exactly the same clips and time.
+
 Writes outputs/runs/<YYYY-MM-DD>_<run-name>/{per_clip.csv, summary.csv, summary.md, args.json}.
 """
 
@@ -37,6 +41,7 @@ def main() -> None:
     p.add_argument("--systems", nargs="+", help="default: every transcription folder + silence")
     p.add_argument("--shuffled", nargs="+", default=[], help="systems to also score with mismatched clips")
     p.add_argument("--clips", type=Path, default=CLIPS)
+    p.add_argument("--mask-dir", type=Path, help="restrict to clips/frames with <clip>_valid.npy here")
     p.add_argument("--length", type=float, default=8.0)
     args = p.parse_args()
 
@@ -44,6 +49,13 @@ def main() -> None:
     systems = args.systems or sorted(d.name for d in trans.iterdir() if d.is_dir()) + ["silence"]
     with open(args.clips / "clips.csv") as f:
         clips = [r for r in csv.DictReader(f) if r["keep"] == "1"]
+    masks = {}
+    if args.mask_dir:
+        masks = {c["clip_id"]: np.load(args.mask_dir / f"{c['clip_id']}_valid.npy") for c in clips
+                 if (args.mask_dir / f"{c['clip_id']}_valid.npy").exists()}
+        clips = [c for c in clips if c["clip_id"] in masks]
+        print(f"masked evaluation: {len(clips)} clips, "
+              f"{np.mean([m.mean() for m in masks.values()]):.1%} of their frames valid")
 
     def partner(i: int) -> dict:
         """First clip >= 3 positions later (cyclic) that belongs to another piece."""
@@ -71,7 +83,7 @@ def main() -> None:
                     continue
                 est = M.load_notes(f)
             rows.append({"system": system, "clip_id": c["clip_id"], "piece_id": c["piece_id"],
-                         **M.evaluate(ref, est, args.length)})
+                         **M.evaluate(ref, est, args.length, valid=masks.get(c["clip_id"]))})
         if missing:
             print(f"WARNING: {system}: {missing} clips without transcription (skipped)")
 
@@ -124,7 +136,8 @@ def main() -> None:
                "matched > shuffled):\n\n| system | metric | matched | shuffled | better | p |\n|---|---|---|---|---|---|\n"
                + "\n".join(tests) + "\n")
     (out / "summary.md").write_text(md)
-    (out / "args.json").write_text(json.dumps({**vars(args), "clips": str(args.clips), "systems": systems}, indent=2))
+    (out / "args.json").write_text(json.dumps({**vars(args), "clips": str(args.clips), "systems": systems,
+                                               "mask_dir": str(args.mask_dir) if args.mask_dir else None}, indent=2))
     print(md)
     print(f"written to {out}")
 

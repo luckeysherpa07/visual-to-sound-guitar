@@ -84,12 +84,24 @@ def piano_roll(notes: np.ndarray, duration: float, fps: int = FPS) -> np.ndarray
     return roll
 
 
-def frame_prf(ref: np.ndarray, est: np.ndarray, duration: float, fps: int = FPS) -> tuple[float, float, float]:
+def _frames(valid: np.ndarray | None, n: int) -> np.ndarray:
+    if valid is None:
+        return np.ones(n, bool)
+    v = np.zeros(n, bool)
+    v[: min(n, len(valid))] = valid[:n]
+    return v
+
+
+def frame_prf(ref: np.ndarray, est: np.ndarray, duration: float, fps: int = FPS,
+              valid: np.ndarray | None = None) -> tuple[float, float, float]:
     r, e = piano_roll(ref, duration, fps), piano_roll(est, duration, fps)
+    keep = _frames(valid, r.shape[1])
+    r, e = r[:, keep], e[:, keep]
     return _prf(float((r & e).sum()), int(e.sum()), int(r.sum()))
 
 
-def chroma_similarity(ref: np.ndarray, est: np.ndarray, duration: float, fps: int = FPS) -> float:
+def chroma_similarity(ref: np.ndarray, est: np.ndarray, duration: float, fps: int = FPS,
+                      valid: np.ndarray | None = None) -> float:
     """Mean cosine similarity of per-frame pitch-class vectors over frames where the reference sounds.
 
     Frames where the reference is active but the estimate is silent count as 0.
@@ -101,7 +113,7 @@ def chroma_similarity(ref: np.ndarray, est: np.ndarray, duration: float, fps: in
     for p in range(128):
         rc[p % 12] += r[p]
         ec[p % 12] += e[p]
-    active = rc.sum(0) > 0
+    active = (rc.sum(0) > 0) & _frames(valid, rc.shape[1])
     if not active.any():
         return 0.0
     num = (rc * ec).sum(0)[active]
@@ -124,16 +136,34 @@ def onset_curve(notes: np.ndarray, duration: float, fps: int = FPS, sigma_frames
     return curve
 
 
-def onset_correlation(ref: np.ndarray, est: np.ndarray, duration: float, fps: int = FPS) -> float:
+def onset_correlation(ref: np.ndarray, est: np.ndarray, duration: float, fps: int = FPS,
+                      valid: np.ndarray | None = None) -> float:
     """Pearson correlation of smoothed onset curves (0 if either is constant, e.g. no notes)."""
     a, b = onset_curve(ref, duration, fps), onset_curve(est, duration, fps)
+    keep = _frames(valid, len(a))
+    a, b = a[keep], b[keep]
     if a.std() == 0 or b.std() == 0:
         return 0.0
     return float(np.corrcoef(a, b)[0, 1])
 
 
-def evaluate(ref: np.ndarray, est: np.ndarray, duration: float) -> dict[str, float]:
-    """All metrics for one clip."""
+def restrict(notes: np.ndarray, valid: np.ndarray, fps: int = FPS) -> np.ndarray:
+    """Notes whose onset frame is valid."""
+    if len(notes) == 0:
+        return notes
+    idx = np.clip(np.round(notes[:, 0] * fps).astype(int), 0, len(valid) - 1)
+    return notes[valid[idx]]
+
+
+def evaluate(ref: np.ndarray, est: np.ndarray, duration: float, valid: np.ndarray | None = None) -> dict[str, float]:
+    """All metrics for one clip.
+
+    ``valid``: optional (T,) bool per 25 fps frame. Only notes with a valid onset frame are scored and
+    frame-level metrics (frame F1, chroma, onset correlation) use valid frames only. Used when part of a
+    clip has no usable view (e.g. after a camera cut), so no system is charged for those frames.
+    """
+    if valid is not None:
+        ref, est = restrict(ref, valid), restrict(est, valid)
     out = {"n_ref": len(ref), "n_est": len(est)}
     for tol in (0.05, 0.1):
         p, r, f = note_prf(ref, est, tol)
@@ -141,8 +171,8 @@ def evaluate(ref: np.ndarray, est: np.ndarray, duration: float) -> dict[str, flo
         out.update({f"onset_p{ms}": p, f"onset_r{ms}": r, f"onset_f{ms}": f})
     out["onset_offset_f50"] = note_prf(ref, est, 0.05, with_offset=True)[2]
     out["timing_f50"] = timing_prf(ref, est, 0.05)[2]
-    p, r, f = frame_prf(ref, est, duration)
+    p, r, f = frame_prf(ref, est, duration, valid=valid)
     out.update(frame_p=p, frame_r=r, frame_f=f)
-    out["chroma_sim"] = chroma_similarity(ref, est, duration)
-    out["onset_corr"] = onset_correlation(ref, est, duration)
+    out["chroma_sim"] = chroma_similarity(ref, est, duration, valid=valid)
+    out["onset_corr"] = onset_correlation(ref, est, duration, valid=valid)
     return out

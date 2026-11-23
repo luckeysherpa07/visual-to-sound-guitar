@@ -286,7 +286,7 @@ transcriptions in `data/interim/baseline_clips/transcriptions/mmaudio_{noprompt,
 
 ---
 
-## CP5 — Fretboard strips for V2N (in progress, 2026-11-23)
+## CP5 — Fretboard strips for V2N (2026-11-23)
 
 **Goal:** turn each GAPS clip into V2N's input format: a rectified grayscale 800×144 strip of the fretboard
 (V2N uses the keyboard), so the piano model can be run zero-shot in CP6. Dataset: the same 90 GAPS test clips;
@@ -329,4 +329,62 @@ used to train the fretboard estimator (that would leak into the GAPS test evalua
 `data/labels/fretboard_corners/gaps_test_baseline_EVAL_ONLY.jsonl`. (The plan originally said they could be
 reused as training data; that was wrong. Only the CP8 clicks on the GAPS train split can.)
 
-**Next:** click the 90 frames, then run `30f_make_v2n_strips.py` and check the tracking sheet.
+**Result (after clicking all 90 frames, fret 12 everywhere)**
+
+```bash
+python scripts/30f_make_v2n_strips.py
+```
+
+| | clips |
+|---|---|
+| Strips made | **74** |
+| Skipped while clicking (nut or fret 12 not visible: close-ups, wide/low-res shots) | 16: `027_Zpswc_c2`, `031_vpswc_c1`, `100_Lf1wc_c1`, `142_GD1wc_c2`, `201_gk1wc_c1/c2/c3`, `208_c41wc_c2/c3`, `222_W41wc_c3`, `247_sy1wc_c1/c2`, `291_3Sswc_c1/c2`, `354_-k1wc_c2`, `373_4w1wc_c1` |
+| Flagged: < 90 % of frames tracked (all because of hard cuts; frames after the cut are black) | 8: `027_Zpswc_c3` 84 %, `051_rc1wc_c1` 67 %, `051_rc1wc_c3` 81 %, `104_xf1wc_c3` 72 %, `222_W41wc_c1` 85 %, `291_3Sswc_c3` 56 %, `354_-k1wc_c1` 63 %, `354_-k1wc_c3` 66 % |
+| Frames where the tracker lost the neck | 0 (median 100–390 inlier features per frame) |
+
+**Visual check** (`strips/tracking_sheet.jpg` + close-ups of the lowest-similarity clips):
+- Strips are correct in orientation and content: neck horizontal, frets vertical, nut left, soundhole right,
+  fingers visible above/below the neck. 640×480 and smaller videos give blurry strips (`019_Vpswc`, `358_441wc`).
+- Low strip-to-reference similarity was mostly caused by hands moving over the neck, not by drift.
+- **Known failures:** (1) dissolves (gradual cross-fades) are not detected as cuts and the tracker follows the
+  blend: first ~2 s wrong in `375_1w1wc_c1` and `341_1M1wc_c2`; (2) slight drift at the strip edges near the end
+  of `100_Lf1wc_c3` (neck stays in the strip). These few frames cannot change the zero-shot V2N conclusion; for
+  the main pipeline, dissolve detection and an appearance check against the reference frame are needed.
+
+**Lesson for the main pipeline:** with 16/90 clips unusable (no full fretboard in view) and 8/90 with cuts,
+~18 % of GAPS test clip time has no usable fretboard view; the final model must handle missing/partial views
+(e.g. hold or mask), and the GAPS visibility audit should report this per piece.
+
+**Outputs (local):** `data/interim/baseline_clips/strips/{<clip>.npy, strips.csv, tracking_sheet.jpg}`,
+clicks `data/labels/fretboard_corners/gaps_test_baseline_EVAL_ONLY.jsonl`.
+
+### CP5 addendum — masked evaluation (2026-11-23)
+
+**Problem:** in 8 clips with camera cuts the strips are black outside the clicked shot, and in 2 clips a
+dissolve gives a wrong view for the first frames. V2N cannot see anything there, so counting the notes in
+those parts as V2N errors would be unfair (our cropping's fault, not V2N's).
+
+**Decision:** evaluate only the time with a valid fretboard view, for *every* system (also MMAudio and the
+ceiling), so all rows of the table use exactly the same clips and frames. Chosen over clicking extra frames in
+the other shots (~10 more clicks) because it needs no extra annotation and the lost time is small.
+
+**How**
+- `30f_make_v2n_strips.py` writes `strips/<clip>_valid.npy` (per 25 fps frame): inside the clicked shot and not
+  listed in `data/interim/baseline_clips/invalid_frames.txt`. Invalid frames get a black strip.
+- `invalid_frames.txt` (checked by eye on the strips): `375_1w1wc_c1 0–64` and `341_1M1wc_c2 0–64` (dissolves).
+- `note_metrics.evaluate(..., valid=mask)`: only notes with a valid onset frame are scored; frame F1, chroma and
+  onset correlation use valid frames only (unit-tested).
+- `30e_evaluate_baselines.py --mask-dir data/interim/baseline_clips/strips`: only the 74 clips with strips.
+
+**Masked subset:** 74 clips, 96.1 % of their frames valid; 10 clips flagged (< 90 % valid: 8 cuts + 2 dissolves).
+
+**MMAudio on the masked subset** (run `2026-11-23_cp7_mmaudio_masked`) — same picture as on all 90 clips:
+
+| system | note F1@50 | timing F1 | chroma sim | onset corr |
+|---|---|---|---|---|
+| real audio (ceiling) | 93.6 | 95.4 | 0.892 | 0.903 |
+| MMAudio, video only | 3.1 | 35.5 | 0.205 | 0.111 |
+| MMAudio + prompt | 3.0 | 35.7 | 0.203 | 0.105 |
+| real music, wrong piece (chance) | 2.1 | 28.1 | 0.213 | −0.01 |
+
+From now on the masked subset is the reference for all rows that include V2N.

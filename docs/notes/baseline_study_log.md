@@ -79,3 +79,60 @@ Per piece (audio/video length in s):
 - yt-dlp warns that Python 3.10 is deprecated; works for now, a future yt-dlp may need 3.11.
 
 **Outputs (local):** `data/raw/gaps/{audio,midi,videos}/`, `data/raw/gaps/summary_test.csv`, `data/raw/gaps/videos/failed_test.tsv` (empty).
+
+---
+
+## CP2 — Evaluation clips (2026-11-23)
+
+**Command**
+
+```bash
+python scripts/30b_make_eval_clips.py
+```
+
+**What it does:** for every GAPS test piece, 3 non-overlapping 8 s windows (one per third of the piece, random among
+windows with ≥ 8 note onsets, seeded). Per clip: silent video resampled to 25 fps, real GAPS audio, GT MIDI (notes
+with onset in the window, shifted to 0, offsets clipped at the window end). Changed from the plan: all 30 pieces
+instead of ~20, so pieces without a visible guitar can be removed and enough remain.
+
+**Result**
+
+| | |
+|---|---|
+| Clips | 90 (30 pieces × 3), 12.0 min |
+| Notes per clip | median 31 (range 12–77) |
+| Sync correlation | 0.98–1.00 for every clip |
+| Sync lag (video audio vs GAPS audio) | constant per piece: 0 ms (2 pieces), 13.1 ms (2), 23.2 ms (1), 36.3 ms (21), 49.4 ms (4) |
+| Residual lag after correction | < 0.1 ms on all 90 clips |
+
+**Sync finding.** GAPS audio (and therefore its MIDI) is *earlier* than the picture by a constant amount per piece.
+The values are exactly audio-codec priming delays at 44.1 kHz: 576 samples = 13.1 ms (MP3), 1024 = 23.2 ms (AAC),
+1600 = 36.3 ms, 2176 = 49.4 ms (sums of these). So the GAPS wav was decoded from a differently encoded copy of the
+YouTube audio. Instead of dropping the 4 pieces with > 40 ms (1 frame) lag, as first planned, every clip is corrected:
+video window [t, t+8) is paired with GAPS audio/MIDI [t − lag, t − lag + 8). Without this, most GT onsets would be
+~1 frame early relative to the video. **This matters for the whole thesis, not only the baseline: any GAPS
+video↔MIDI pairing must apply this per-piece lag.**
+
+**Contact sheet** — first version showed only the middle frame per clip; now 3 frames per clip (start, middle,
+end; `--frames-per-clip`), which also reveals camera cuts and non-guitar shots inside a clip.
+
+**Clips without a guitar and how they were fixed (goal: keep all 90 clips)**
+- First sheet: no guitar in `358_441wc_c1` (album cover), `358_441wc_c3` (landscape), `208_c41wc_c1` (Christmas decoration).
+- Step 1, `--reject <clip_id>`: marks the window as bad (`rejected_windows.txt`) and draws a new random window from the
+  same part of the piece. Only the rejected clips change. Did not help here: the new windows were again landscapes / a dissolve.
+- Step 2, timeline check (one frame every 5 s of the full video): `358_441wc` is a slideshow-style video, the guitarist
+  is only visible at ~25–58 s and ~75–92 s; `208_c41wc` is clear at ~30–60 s (dissolves around 20–25 s and 65 s).
+- Step 3, `--set <clip_id>=<start>` (`manual_windows.txt`, column `window=manual` in clips.csv):
+  `358_441wc_c1=27`, `358_441wc_c2=42`, `358_441wc_c3=77`, `208_c41wc_c1=31`. All frames now show the guitarist.
+- Lesson for CP8 (270 train videos): some GAPS videos contain long non-guitar parts, so a per-video visibility check
+  is needed there (automatic, e.g. CLIP zero-shot, instead of by eye).
+
+**Other observations**
+- Many videos are edited multi-camera productions (cuts between wide shot and close-ups inside a piece, e.g. `100_Lf1wc`, `201_gk1wc`, `291_3Sswc`, `373_4w1wc`). Fine for V2A; for V2N strips (CP5) one homography per clip only works if there is no cut inside the clip.
+- `201_gk1wc` is 320×240.
+- Camera views range from full body to fretboard close-ups; mostly front-facing, nut on the image right.
+
+**Final:** 90 clips from 30 pieces, 12.0 min; 86 random windows, 4 manual.
+
+**Outputs (local):** `data/interim/baseline_clips/{clips.csv, contact_sheet.jpg, rejected_windows.txt, manual_windows.txt, video/, audio/, midi/, plots/}`
+(plots: `019_Vpswc_c1`, `118_VD1wc_c1`, `263_cw1wc_c1`).

@@ -30,7 +30,7 @@ Supervisor's request: before going into GuiFiR detail, get a bird's-eye view of 
 |---|---|---|---|
 | 0 | Save plan in CLAUDE.md + `docs/notes/` | CLAUDE.md diff | done |
 | 1 | GAPS data: metadata, audio, MIDI from HF `xavriley/GAPS` v1.1 (not the v1 zip: case-clashing names), test videos (yt-dlp) | summary: pieces, videos ok/missing, hours | done (Nov 23): test 30/30 pieces, 27 performers, 1.77 h, all videos available; audio and video lengths match within 0.1 s; fps 23.976–30, mostly 720p (one 320×240: `201_gk1wc`) |
-| 2 | Eval clips: silent video + real audio + GT MIDI per clip, sync check | `clips.csv`, contact sheet, 3 piano rolls | todo |
+| 2 | Eval clips: silent video + real audio + GT MIDI per clip, sync check | `clips.csv`, contact sheet, 3 piano rolls | done (Nov 23): 90 clips (30 pieces × 3 × 8 s, 25 fps), median 31 notes/clip. GAPS audio/MIDI lag the video's audio by a constant 0–49 ms per piece (codec priming); corrected, residual < 0.1 ms. Contact sheet 3 frames/clip; no-guitar clips fixed (`--reject` redraws, `--set` manual windows for slideshow-style `358_441wc` and `208_c41wc_c1`), still 90 clips |
 | 3 | Transcription ceiling on real audio (GAPS authors' model, fallback basic-pitch) + metrics code | ceiling F1 ≈ GAPS paper level | todo |
 | 4 | MMAudio on all clips, no prompt and "solo classical guitar" | ~5 videos with generated audio | todo |
 | 5 | Fretboard strips for V2N: click nut + fret 12 per clip → homography → 800×144 strip | grid of all strips | todo |
@@ -87,7 +87,7 @@ Guitar adaptations decided so far:
 
 | Dataset | Role | Labels | Notes |
 |---|---|---|---|
-| **GAPS** | Main training set and real-MIDI evaluation | Real note-level MIDI (score-aligned) | 300 classical guitar performances, ~14 h, >250k notes, 205 performers, YouTube videos in varied recording conditions. Fretboard visibility not yet audited. Source: HF `xavriley/GAPS` v1.1 (MIT, audio included; v1 Zenodo zip has case-clashing file names, don't use). Splits from `gaps_metadata_with_splits.csv`: 270 train / 30 test; 101 rows without split are ignored. Videos via `yt_id` (YouTube). |
+| **GAPS** | Main training set and real-MIDI evaluation | Real note-level MIDI (score-aligned) | 300 classical guitar performances, ~14 h, >250k notes, 205 performers, YouTube videos in varied recording conditions. Fretboard visibility not yet audited. Source: HF `xavriley/GAPS` v1.1 (MIT, audio included; v1 Zenodo zip has case-clashing file names, don't use). Splits from `gaps_metadata_with_splits.csv`: 270 train / 30 test; 101 rows without split are ignored. Videos via `yt_id` (YouTube). **Sync:** GAPS audio/MIDI is earlier than the video by a constant per-piece lag (0–49 ms = codec priming delays); always measure it (`baselines.clips.measure_sync`) and shift MIDI when pairing with video. Many videos are multi-camera edits (cuts inside a piece). |
 | **magcil/guitar_style_dataset** | Extra training data | None. Pseudo-MIDI from audio transcription of the wav files, spot-checked | Chosen because it has the needed video. Training only. |
 | **Own recordings** | Multi-view data plus a carefully labelled test set | Audio-transcribed MIDI, manually checked for the test portion | Multi-view cameras, clean DI/mic audio, sync by clap or timecode. |
 
@@ -178,13 +178,14 @@ data/          (gitignored) raw/{gaps,magcil,guifir,own} → interim/{landmarks,
 src/guitar2midi/   importable package: data, preprocessing, model, training, decoding, evaluation, utils
   data/guifir.py                    GuiFiR-Vid reader (frames, neck boxes, GT corners, lt/lb/rt/rb mapping, extract_annotated_frames)
   data/gaps.py                      GAPS v1.1 reader/downloader: metadata+splits, audio/MIDI (HF), videos (yt-dlp) → data/raw/gaps/{audio,midi,videos}/<id>.*
+  baselines/clips.py                eval clips for the baseline study: window selection, cutting, sync measurement + correction, contact sheet, piano-roll plot
   preprocessing/fretboard_grid.py   126-point grid from 4 corners, corners_valid, draw_grid
   preprocessing/fpe_inference.py    FretboardPoseEstimator.predict(image, boxes) -> (N, 126, 2)
 scripts/       thin numbered entry points
   done:    setup_mmpose.sh, 01a_prepare_guifir.sh, 01b_annotate_corners.py, 01c_build_fretboard_coco.py,
            01d_train_fpe.py, 01e_eval_fpe.py
   planned: 00_audit_gaps, 02_warp_strips, 03_make_labels, 04_make_splits, 10_train, 20_evaluate
-  baseline study: done 30a_download_gaps (--split test|train, --no-audio, --no-videos); planned 30b_make_eval_clips, 30c_run_mmaudio.sh, 30d_transcribe,
+  baseline study: done 30a_download_gaps (--split test|train, --no-audio, --no-videos), 30b_make_eval_clips (→ data/interim/baseline_clips/); planned 30c_run_mmaudio.sh, 30d_transcribe,
            30e_evaluate_baselines, 30f_make_v2n_strips, 30g_run_v2n.sh, 30h_finetune_v2n
 notebooks/     exploration only, numbered
 outputs/       (gitignored) runs/<YYYY-MM-DD>_<name>/ (mmengine work_dir: merged config, checkpoints, logs)

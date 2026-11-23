@@ -9,6 +9,8 @@ All functions take MIDI files or note arrays (onset, offset, pitch) in seconds.
   (does the output at least get the harmony / key right?)
 - onset correlation: Pearson correlation of smoothed onset-count curves
   (is the output's rhythm synced to the real playing, regardless of pitch?)
+- timing F1: onset-time F1 ignoring pitch (mir_eval.onset, 50 ms); simultaneous onsets (chords)
+  within 30 ms are merged first, so it scores "a pluck happens here", not how many notes
 """
 
 from __future__ import annotations
@@ -51,6 +53,23 @@ def note_prf(ref: np.ndarray, est: np.ndarray, onset_tolerance: float = 0.05,
     ei, ep = _mir(est)
     p, r, f, _ = mir_eval.transcription.precision_recall_f1_overlap(
         ri, rp, ei, ep, onset_tolerance=onset_tolerance, offset_ratio=0.2 if with_offset else None)
+    return float(p), float(r), float(f)
+
+
+def merge_onsets(onsets: np.ndarray, gap: float = 0.03) -> np.ndarray:
+    """Sorted unique pluck times: onsets closer than ``gap`` to the previous kept one are merged."""
+    out = []
+    for t in np.sort(onsets):
+        if not out or t - out[-1] >= gap:
+            out.append(t)
+    return np.array(out)
+
+
+def timing_prf(ref: np.ndarray, est: np.ndarray, window: float = 0.05) -> tuple[float, float, float]:
+    """Pitch-agnostic onset P/R/F1 on merged pluck times."""
+    if len(ref) == 0 or len(est) == 0:
+        return 0.0, 0.0, 0.0
+    f, p, r = mir_eval.onset.f_measure(merge_onsets(ref[:, 0]), merge_onsets(est[:, 0]), window=window)
     return float(p), float(r), float(f)
 
 
@@ -121,6 +140,7 @@ def evaluate(ref: np.ndarray, est: np.ndarray, duration: float) -> dict[str, flo
         ms = int(tol * 1000)
         out.update({f"onset_p{ms}": p, f"onset_r{ms}": r, f"onset_f{ms}": f})
     out["onset_offset_f50"] = note_prf(ref, est, 0.05, with_offset=True)[2]
+    out["timing_f50"] = timing_prf(ref, est, 0.05)[2]
     p, r, f = frame_prf(ref, est, duration)
     out.update(frame_p=p, frame_r=r, frame_f=f)
     out["chroma_sim"] = chroma_similarity(ref, est, duration)

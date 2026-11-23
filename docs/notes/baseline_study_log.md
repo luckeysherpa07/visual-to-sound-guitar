@@ -224,3 +224,62 @@ python scripts/30c_plot_spectrograms.py
 **Caveats**
 - MMAudio reads our 8.00 s clips as 7.96 s (one frame), so the last 40 ms have no generated audio (same for every clip, negligible).
 - MMAudio's sync encoder center-crops frames to a square: on wide shots the hands can be partly outside it.
+
+---
+
+## CP7 (part 1) — "How bad is MMAudio?" (2026-11-23)
+
+Done before CP5/CP6 so the main answer is available early; V2N rows follow after CP6.
+
+**Commands**
+
+```bash
+conda activate amt
+python scripts/30d_transcribe.py --system mmaudio_noprompt --audio-dir data/interim/baseline_clips/generated/mmaudio_noprompt
+python scripts/30d_transcribe.py --system mmaudio_prompt   --audio-dir data/interim/baseline_clips/generated/mmaudio_prompt
+conda activate guitar2midi
+python scripts/30e_evaluate_baselines.py --run-name cp7_mmaudio \
+    --systems real_audio mmaudio_noprompt mmaudio_prompt silence --shuffled real_audio mmaudio_noprompt mmaudio_prompt
+```
+
+**New in the evaluation**
+- `timing_f50`: pluck-time F1 ignoring pitch (chords merged), so timing can be judged separately from pitch.
+- `X@shuffled`: each clip scored against X's output for a clip of a *different piece*. `real_audio@shuffled` =
+  "real guitar music, wrong piece" = chance level. Paired Wilcoxon test matched vs shuffled.
+
+**Result** (90 clips, mean; F1 in %)
+
+| system | note onset F1@50 | F1@100 | frame F1 | timing F1 (pitch ignored) | chroma sim | onset corr | notes/clip |
+|---|---|---|---|---|---|---|---|
+| real audio → transcription (ceiling) | **93.5** | 93.7 | 83.0 | 95.6 | 0.894 | 0.905 | 35.1 |
+| MMAudio, video only | **3.3** | 6.1 | 10.7 | 35.9 | 0.198 | 0.114 | 36.8 |
+| MMAudio, video + "solo classical guitar" | 3.2 | 5.9 | 10.5 | 35.7 | 0.193 | 0.110 | 36.1 |
+| real guitar music, wrong piece (chance) | 2.1 | 4.0 | 9.9 | 28.3 | 0.216 | 0.00 | 35.1 |
+| MMAudio, wrong clip | 1.8 | 3.0 | 7.5 | 26.7 | 0.186 | 0.00 | 36.8 |
+| silence | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+
+Matched vs shuffled (MMAudio, video only): note F1 3.3 vs 1.8 (p = 7e-4), timing F1 35.9 vs 26.7 (p = 8e-6,
+better on 73 % of clips), onset corr 0.11 vs 0.00 (p = 2e-5), chroma 0.198 vs 0.186 (p = 0.45, not significant).
+
+**What we learned**
+1. **Notes: almost completely wrong.** 3.3 % note F1 vs 93.5 % possible; only 1–1.5 points above chance.
+2. **Pitch / harmony: no information from the video.** Chroma similarity is not better than for a random other
+   clip, and even below real guitar music from the wrong piece.
+3. **Timing: a weak but real signal.** Pluck timing is clearly above chance (35.9 vs ~27 %, significant), so
+   MMAudio reacts to the picking motion, but far from the 95.6 % possible.
+4. **Text prompt: no effect.**
+5. Note density is right (36.8 vs 34.9 notes per clip): it produces the right *amount* of guitar-like plucking.
+
+**Summary for the supervisor (one paragraph)**
+
+> We ran MMAudio, a state-of-the-art open-domain video-to-audio model, on 90 silent 8-second clips from the 30
+> GAPS test performances and transcribed its output with the GAPS benchmark transcription model. On the real
+> audio this pipeline reaches 93.5 % note F1, but on MMAudio's audio only 3.3 %, close to the 2 % obtained by
+> comparing with a different piece. The generated audio sounds like a plucked guitar with roughly the right
+> note density and its pluck timing follows the video slightly better than chance (36 % vs 27 % timing F1),
+> but its pitches carry no information about the notes being played (pitch-class similarity equal to a random
+> clip). Existing video-to-audio models therefore produce plausible guitar *sound* but not the *music*: they do
+> not read the fretboard. This is the gap our visual transcription approach addresses.
+
+**Outputs (local):** `outputs/runs/2026-11-23_cp7_mmaudio/{summary.md, summary.csv, per_clip.csv}`,
+transcriptions in `data/interim/baseline_clips/transcriptions/mmaudio_{noprompt,prompt}/`.

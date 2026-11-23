@@ -16,7 +16,7 @@ REF = notes([(0.5, 1.0, 60), (1.0, 1.5, 64), (2.0, 3.0, 67), (4.0, 4.5, 40), (6.
 
 def test_identical_is_perfect():
     m = M.evaluate(REF, REF, DUR)
-    for k in ("onset_f50", "onset_f100", "onset_offset_f50", "frame_f", "chroma_sim", "onset_corr"):
+    for k in ("onset_f50", "onset_f100", "onset_offset_f50", "timing_f50", "frame_f", "chroma_sim", "onset_corr"):
         assert m[k] == pytest.approx(1.0), k
 
 
@@ -39,6 +39,7 @@ def test_octave_error_keeps_chroma_but_not_f1():
     octave[:, 2] += 12
     m = M.evaluate(REF, octave, DUR)
     assert m["onset_f50"] == 0.0
+    assert m["timing_f50"] == pytest.approx(1.0)
     assert m["chroma_sim"] == pytest.approx(1.0)
     assert m["onset_corr"] == pytest.approx(1.0)
 
@@ -56,3 +57,9 @@ def test_load_notes_roundtrip(tmp_path):
     pm.instruments.append(inst)
     pm.write(str(tmp_path / "x.mid"))
     np.testing.assert_allclose(M.load_notes(tmp_path / "x.mid"), REF, atol=1e-3)
+
+
+def test_timing_merges_chords():
+    chord = notes([(1.0, 2.0, 40), (1.01, 2.0, 47), (1.02, 2.0, 52), (3.0, 4.0, 60)])  # 2 plucks
+    one_note_each = notes([(1.0, 2.0, 70), (3.0, 4.0, 70)])
+    assert M.timing_prf(chord, one_note_each)[2] == pytest.approx(1.0)

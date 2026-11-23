@@ -35,7 +35,7 @@ Supervisor's request: before going into GuiFiR detail, get a bird's-eye view of 
 | 4 | MMAudio on all clips, no prompt and "solo classical guitar" | ~5 videos with generated audio | done (Nov 23): large_44k_v2, seed 42, 90 × 2 clips in ~9 min (env `mmaudio`). Output looks like plucked strings with plausible rhythm, pitches mostly off (spectrograms). No leakage: clips have no audio stream; 0/300 GAPS videos in VGGSound |
 | 5 | Fretboard strips for V2N: click nut + fret 12 per clip → homography → 800×144 strip | grid of all strips | todo |
 | 6 | V2N zero-shot on the strips (public checkpoints) | predicted vs GT piano roll | todo |
-| 7 | Results table: ceiling / MMAudio ± prompt / V2N zero-shot / shuffled video / silence | table + summary for supervisor | todo |
+| 7 | Results table: ceiling / MMAudio ± prompt / V2N zero-shot / shuffled video / silence | table + summary for supervisor | MMAudio part done (Nov 23): note F1 **3.3 %** vs ceiling 93.5 % (chance 2.1 %); timing F1 35.9 vs chance ~27 (significant); chroma = chance; prompt no effect. V2N rows after CP6 |
 | 8 | V2N fine-tuning pilot: guitar heads, GAPS train strips (1 click set per video); full fine-tune vs scratch (LoRA optional) | curves + table rows | todo |
 | 9 | Optional: more V2A models, magcil (pseudo), own data | extra table rows | todo |
 
@@ -181,7 +181,7 @@ src/guitar2midi/   importable package: data, preprocessing, model, training, dec
   baselines/v2a_mmaudio.py          MMAudio wrapper (env mmaudio only): model loaded once, weights in ~/.cache/mmaudio, mux for listening
   baselines/audio_plots.py          real vs generated spectrograms with GT notes overlaid
   baselines/transcribe.py           audio→MIDI with the GAPS benchmark model (env amt only)
-  evaluation/note_metrics.py        onset F1 @50/100 ms, onset+offset F1, frame F1 (25 fps), chroma similarity, onset correlation (mir_eval)
+  evaluation/note_metrics.py        onset F1 @50/100 ms, onset+offset F1, frame F1 (25 fps), timing F1 (pitch ignored), chroma similarity, onset correlation (mir_eval)
   baselines/clips.py                eval clips for the baseline study: window selection, cutting, sync measurement + correction, contact sheet, piano-roll plot
   preprocessing/fretboard_grid.py   126-point grid from 4 corners, corners_valid, draw_grid
   preprocessing/fpe_inference.py    FretboardPoseEstimator.predict(image, boxes) -> (N, 126, 2)

@@ -387,4 +387,18 @@ the other shots (~10 more clicks) because it needs no extra annotation and the l
 | MMAudio + prompt | 3.0 | 35.7 | 0.203 | 0.105 |
 | real music, wrong piece (chance) | 2.1 | 28.1 | 0.213 | −0.01 |
 
+**What "masked subset" means:** (1) only the 74 clips with clicked corners (the 16 skipped clips are left out),
+and (2) inside those clips only the frames where the tracked box shows the correct fretboard: the clicked camera
+shot, minus the dissolve frames. Example: `291_3Sswc_c3` is valid from frame 88 to 200, so a GT note at 1.0 s
+(frame 25) is ignored and one at 5.0 s (frame 125) is scored, for every system.
+
+**Why MMAudio was re-evaluated on it, and why the numbers hardly change**
+- Purpose: a *representativeness check*. Dropping 16 clips and some frames could have removed especially easy or
+  hard material and shifted the results. All 90 vs masked 74: ceiling 93.5 → 93.6, MMAudio 3.3 → 3.1, chance
+  2.1 → 2.1. Nearly identical, so the subset is representative of the GAPS test clips and results on it are
+  comparable with the full-set results.
+- The mask hardly affects MMAudio by design: MMAudio always sees the full original video (not the strips), and
+  its score is already near chance. The mask exists for **V2N**, which only sees the strips and would otherwise
+  be charged for notes in black (no-view) frames.
+
 From now on the masked subset is the reference for all rows that include V2N.

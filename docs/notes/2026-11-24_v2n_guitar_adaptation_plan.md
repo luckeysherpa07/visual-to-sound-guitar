@@ -1,4 +1,4 @@
-# V2N on guitar — what to change (draft plan for CP8, 2026-11-24)
+# V2N on guitar — what to change (draft plan for CP8, 2026-11-24; now CP12 after the renumbering)
 
 Status: **draft, not approved yet.** Written after CP6 (V2N zero-shot = silence). To be reviewed before CP8 starts.
 

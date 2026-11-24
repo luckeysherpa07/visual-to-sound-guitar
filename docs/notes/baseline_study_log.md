@@ -3,6 +3,11 @@
 One section per checkpoint: date, what was run, result, what we learned, where the outputs are.
 Plan: [2026-11-23_baseline_study_plan.md](2026-11-23_baseline_study_plan.md). Short status table: `CLAUDE.md` → "Current phase".
 
+**Renumbering (2026-11-24).** The study now also covers GuiFiR-Vid and magcil. New CP7 (GuiFiR preprocessing),
+CP8 (magcil preprocessing), CP9 (MMAudio, all datasets), CP10 (V2N, all datasets); the results table is now CP11,
+the V2N fine-tune CP12, optional extensions CP13. Sections below keep their original names; "CP7 (part 1)" is GAPS
+content of today's CP9/CP11. Plan: "Extension" section in the plan file.
+
 Note: `data/` and `outputs/` are not in git. Paths below are local; rerun the command to regenerate them.
 
 ---
@@ -227,7 +232,7 @@ python scripts/30c_plot_spectrograms.py
 
 ---
 
-## CP7 (part 1) — "How bad is MMAudio?" (2026-11-23)
+## CP7 (part 1) — "How bad is MMAudio?" (2026-11-23) — old numbering, now part of CP9/CP11 (GAPS)
 
 Done before CP5/CP6 so the main answer is available early; V2N rows follow after CP6.
 

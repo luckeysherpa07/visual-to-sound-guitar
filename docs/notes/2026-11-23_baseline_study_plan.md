@@ -15,6 +15,32 @@ is the ceiling, so the gap is purely the V2A error.
 ThinkSound (if they fit), Foley Music (if weights exist). Piano-only models (Audeo, S2S, V2N) and video-to-music
 models are related work only. No public guitar video→MIDI model exists; that gap is the thesis.
 
+## Extension (2026-11-24): GuiFiR-Vid and magcil
+
+Before the results table, the same baselines also run on two more guitar datasets, so "how bad are existing models"
+covers more than classical concert videos. Checkpoints were renumbered: **one checkpoint per dataset for all of its
+preprocessing (CP7, CP8), then one checkpoint per task that runs on all datasets (CP9–CP11)**. CP0–CP6 unchanged;
+old CP7 → CP11, old CP8 → CP12, old CP9 → CP13. Earlier names stay as they are (log section "CP7 (part 1)", run
+folder `2026-11-24_cp7_v2n_masked`).
+
+| | GAPS (CP0–6) | GuiFiR-Vid (CP7) | magcil guitar_style_dataset (CP8) |
+|---|---|---|---|
+| Guitar / music | classical nylon, classical repertoire | mostly steel-string acoustic + some classical; pop/anime/film covers | electric, 3 guitars × 3 amps; 9 technique exercises (alternate/sweep picking, bend, hammer-on, pull-off, legato, slide, tapping, vibrato) |
+| Video | YouTube concerts, mostly 720p, multi-camera cuts | YouTube tab-tutorial clips, 10 s, mostly 640×360 @ 29.97, tab overlays, front camera | own recordings, mp4 (view/fps to check) |
+| Audio | yes (HF) | yes, inside the mp4 | separate .wav |
+| Note labels | **real MIDI** | sparse tablature (~20 frames/clip, fret per string + capo, GT or audio-derived), no onsets/offsets | none time-aligned; MuseScore scores of the exercises |
+| Fretboard corners | clicked (eval only) | GuiFiR GT corners on test frames → no clicking | clicked |
+| Size used | 90 clips (74 with strips) | ≤ 32 clips (1 per test song) | 27 clips (3 per technique) |
+
+Decisions (Luckey, 2026-11-24):
+- **Pseudo-GT in the same table.** GuiFiR and magcil have no real MIDI; they are scored against the GAPS model's
+  transcription of their real audio. All three datasets go into the same CP11 table, with a label-source column
+  (real MIDI / pseudo-GT) and a footnote. The ceiling row is 100 % by construction there, so the tab check (GuiFiR)
+  and a spot check (magcil) report how trustworthy the reference is. Trained-model test results (CP12+) stay on real MIDI only.
+- **GuiFiR tab = check + extra column.** (a) How often the reference contains the tab pitch at tab frames (CP7);
+  (b) a column "pitch recall at tab frames" for every system in the GuiFiR block. Recall only: the tab is sparse.
+- **Systems:** MMAudio (± prompt) and V2N zero-shot on both new datasets.
+
 ## Checkpoints
 
 Each checkpoint ends with something you can **see** and a short stop where you check it before we continue.
@@ -64,12 +90,46 @@ Each checkpoint ends with something you can **see** and a short stop where you c
 - Code: `scripts/30g_run_v2n.py` (+ positive control `scripts/30g_check_v2n_piano.py`).
 - **You see:** V2N's predicted piano roll next to the GT roll for 3 clips.
 
-### CP7 — Results table ("how bad")
-- Transcribe the generated audio; evaluate all rows: ceiling / MMAudio no prompt / MMAudio + prompt / V2N zero-shot / audio from a different clip (does the video matter?) / silence.
+### CP7 — GuiFiR-Vid preprocessing (added 2026-11-24)
+- Eval clips from the GuiFiR **test** split: 1 clip per song (≤ 32 clips), 8 s, 25 fps; silent video + real audio
+  (GuiFiR mp4s contain audio) → `data/interim/baseline_clips_guifir/`, same layout as the GAPS clips.
+- Reference transcription of the real audio (GAPS model, env `amt`, `30d_transcribe`) = pseudo-GT.
+- Tab check: GuiFiR `frame_tab` (fret per string, 20 = not played) + `frame_capo` + standard tuning → pitch at
+  each annotated frame; report how often the reference contains it (reliability of the pseudo-GT).
+- V2N strips **without clicking**: seed `fretboard_tracking.track_corners` from the GuiFiR GT corners of the first
+  annotated frame in the window (`rb, rt, lb, lt`, × frame_width/640). Test corners = evaluation only, never FPE training.
+- Code: `src/guitar2midi/baselines/clips_guifir.py` (reuses `baselines/clips.py`, `data/guifir.py`), tab→pitch helper,
+  `scripts/31a_make_guifir_clips.py`.
+- **You see:** clips.csv, contact sheet, tab-agreement %, tracking sheet.
+
+### CP8 — magcil preprocessing (added 2026-11-24)
+- No download: extract `~/Downloads/guitar_style_dataset-v1.0.0.zip` (14.4 GB, commit `eb27d7b`) unchanged into
+  `data/raw/magcil/` (+ `SOURCE.txt`); copy the dataset paper
+  (`A_multimodal_dataset_for_electric_guitar_playing_t.pdf`) to `docs/papers/`.
+- Reader `src/guitar2midi/data/magcil.py` (technique, guitar, amp, video, wav). Check camera view / resolution / fps
+  and video↔wav sync (`baselines.clips.measure_sync`).
+- Eval clips: 3 per technique (27 clips, 8 s, 25 fps), `scripts/31b_make_magcil_clips.py`.
+- Reference transcription + spot check (electric guitar through amps vs a classical-trained model).
+- V2N strips with the existing 30f tools (you click nut + fret 12 per clip).
+- **You see:** summary, contact sheet, 3 piano rolls, tracking sheet.
+
+### CP9 — MMAudio on all datasets (added 2026-11-24)
+- `30c_run_mmaudio` unchanged (large_44k_v2, seed 42), no prompt and "solo classical / acoustic / electric guitar"
+  per dataset; `30d` transcribe; `30e` evaluate vs GT (GAPS) or reference (GuiFiR, magcil). GAPS outputs from CP4 reused.
+- Scripts get a `--clips-dir` argument where the GAPS path is hard-coded.
+- **You see:** spectrograms, rows per dataset.
+
+### CP10 — V2N zero-shot on all datasets (added 2026-11-24)
+- `30g_run_v2n` on the GuiFiR and magcil strips (GAPS from CP6), plus the open CP6 re-check of the 0.0 result
+  (flip / crop layout / thresholds as a diagnostic) on all three datasets.
+- **You see:** predicted vs reference rolls, rows per dataset.
+
+### CP11 — Results table ("how bad") — was CP7 before the 2026-11-24 renumbering
+- One table with a block per dataset (GAPS real MIDI, GuiFiR-Vid pseudo-GT, magcil pseudo-GT; label-source column), GuiFiR tab-recall column. Transcribe the generated audio; evaluate all rows: ceiling / MMAudio no prompt / MMAudio + prompt / V2N zero-shot / audio from a different clip (does the video matter?) / silence.
 - Code: `scripts/30e_evaluate_baselines.py` → `outputs/runs/<date>_v2a_baseline/` + `thesis/tables/`.
 - **You see:** one table (note F1 @50/100 ms, frame F1, chroma similarity, onset correlation) + a one-paragraph summary for the supervisor.
 
-### CP8 — V2N fine-tuning pilot on guitar
+### CP12 — V2N fine-tuning pilot on guitar — was CP8
 - Strips for GAPS **train** split: click corners once per *video* (static cameras; ~200 clicks ≈ 1 h), flag videos
   where the guitar moves (corner check at a few frames). No FPE needed.
 - Model: V2N with the 88-key heads + slope prior replaced by guitar pitch heads (onset + frame, ~E2–B5) and a
@@ -77,15 +137,15 @@ Each checkpoint ends with something you can **see** and a short stop where you c
 - Compare: (a) V2N piano weights + **full fine-tune**, (b) same model **from scratch**, (c) optional: LoRA on the
   backbone. Full fine-tune is the main row: V2N is small (ResNet-18 + conv blocks + BiLSTM, no attention) and fits
   in 16 GB, so LoRA saves nothing important and fits conv/LSTM layers poorly.
-- Evaluate on the CP2 test clips; rows added to the CP7 table.
+- Evaluate on the CP2 test clips; rows added to the CP11 table.
 - Code: `src/guitar2midi/model/` (V2N adaptation, reused later for the main model), `scripts/30h_finetune_v2n.py`.
 - **You see:** training curves + table rows: zero-shot vs fine-tuned vs scratch.
 
-### CP9 (optional) — Extend
-- More V2A models (HunyuanVideo-Foley / ThinkSound / Foley Music) if they run; magcil clips (labelled **pseudo**, compared with transcription of the real audio, no headline numbers); own data later with the same scripts.
+### CP13 (optional) — Extend — was CP9
+- More V2A models (HunyuanVideo-Foley / ThinkSound / Foley Music) if they run; own data later with the same scripts (own data = one more preprocessing CP). ~~magcil clips~~ moved to CP8 (2026-11-24).
 - **You see:** extra rows in the same table.
 
-After CP7: update CLAUDE.md and commit (the "how bad" result is ready for the supervisor). After CP8/CP9 again: update CLAUDE.md (paused FPE, new phase, scripts, envs, decision log) and commit.
+After CP11: update CLAUDE.md and commit (the "how bad" result is ready for the supervisor). After CP12/CP13 again: update CLAUDE.md (paused FPE, new phase, scripts, envs, decision log) and commit.
 
 ## Verification
 - Unit tests: GT vs itself → F1 = 1; silence → F1 = 0.
@@ -93,4 +153,4 @@ After CP7: update CLAUDE.md and commit (the "how bad" result is ready for the su
 - Listen to generated clips before trusting the numbers.
 
 ## Rough effort
-CP1–CP2: ~half a day (mostly downloads). CP3: ~half a day. CP4: ~half a day. CP5: ~2 h + 15 min clicking. CP6: ~half a day. CP7: a few hours. CP8: ~3–4 days (1 h clicking, model adaptation, training runs). CP9: open.
+CP1–CP2: ~half a day (mostly downloads). CP3: ~half a day. CP4: ~half a day. CP5: ~2 h + 15 min clicking. CP6: ~half a day. CP7 (GuiFiR prep): ~half a day. CP8 (magcil prep): ~half a day + ~15 min clicking. CP9/CP10: a few hours each. CP11: a few hours. CP12: ~3–4 days (1 h clicking, model adaptation, training runs). CP13: open.

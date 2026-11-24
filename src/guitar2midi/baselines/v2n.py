@@ -46,6 +46,42 @@ def window_starts(n_frames: int, window: int = WINDOW, stride: int = STRIDE) -> 
     return starts
 
 
+FLIPS = ("none", "h", "v", "hv")  # h: nut on the right; v: low E on top; hv: both (= rotate 180)
+LAYOUTS = ("mid", "top")
+PIANO_MEAN, PIANO_STD = 155.0, 85.0  # median per-frame stats of V2N's PianoVAM strips (30g_strip_stats.py, CP10)
+
+
+def transform_strips(strips: np.ndarray, flip: str = "none", layout: str = "mid", norm: bool = False) -> np.ndarray:
+    """Variants of our (T, 144, 800) strips for the CP10 re-check of the zero-shot result.
+
+    Our strips (``fretboard_tracking.strip_homography``) have the neck in rows 36-108 (middle 50 %), nut left,
+    high E on top. V2N's piano crops have the keyboard at the top and a 100 px margin below it (hands).
+    layout "top": rows 36-144 (neck + the margin below it) stretched to 144 rows -> neck in the top 2/3 and a
+    margin below, like the piano crop. Applied after the flip: without "v" the margin kept below the neck is the
+    low-E side of the original strip, with "v" it is the high-E side (where the fretting fingers come from).
+    norm: rescale each frame to the mean/std of the piano strips (ours are darker and flatter: mean ~100, std ~58).
+    """
+    s = strips
+    if "h" in flip:
+        s = s[:, :, ::-1]
+    if "v" in flip:
+        s = s[:, ::-1, :]
+    if layout == "top":
+        import cv2
+
+        h, w = s.shape[1:]
+        top = h // 4  # 36
+        s = np.stack([cv2.resize(np.ascontiguousarray(f[top:]), (w, h), interpolation=cv2.INTER_LINEAR) for f in s])
+    elif layout != "mid":
+        raise ValueError(layout)
+    if norm:
+        f = s.astype(np.float32)
+        mu = f.mean(axis=(1, 2), keepdims=True)
+        sd = f.std(axis=(1, 2), keepdims=True)
+        s = np.clip((f - mu) / np.maximum(sd, 1.0) * PIANO_STD + PIANO_MEAN, 0, 255).astype(np.uint8)
+    return np.ascontiguousarray(s)
+
+
 class V2NTranscriber:
     def __init__(self, checkpoint: Path = V2N_CKPT, device: str | None = None, batch_size: int = 2):
         import torch
@@ -111,7 +147,7 @@ def write_midi(notes, dst: Path) -> None:
 
 
 def plot_roll(strips: np.ndarray, probs: dict[str, np.ndarray], pred_notes, gt_midi: Path, valid: np.ndarray | None,
-              dst: Path, title: str = "") -> None:
+              dst: Path, title: str = "", ref_label: str = "ground truth (GAPS)") -> None:
     """Strip thumbnails, GT piano roll and V2N onset probabilities with decoded notes, on one time axis."""
     import matplotlib
     matplotlib.use("Agg")
@@ -130,7 +166,7 @@ def plot_roll(strips: np.ndarray, probs: dict[str, np.ndarray], pred_notes, gt_m
     axes[0].set_title("strips at 6 evenly spaced times (nut left, high E on top)", fontsize=9)
 
     lo, hi = MIN_MIDI, MIN_MIDI + 87
-    for ax, label in ((axes[1], "ground truth (GAPS)"), (axes[2], "V2N zero-shot: onset prob + decoded notes")):
+    for ax, label in ((axes[1], ref_label), (axes[2], "V2N zero-shot: onset prob + decoded notes")):
         ax.axhspan(40, 83, color="tab:green", alpha=0.07, lw=0)  # E2-B5, classical guitar range
         ax.set_ylim(lo - 1, hi + 1)
         ax.set_ylabel("MIDI pitch")

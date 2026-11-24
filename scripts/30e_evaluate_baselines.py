@@ -1,4 +1,4 @@
-"""Evaluate transcriptions of the baseline clips against GAPS ground truth (CP3, CP7).
+"""Evaluate transcriptions of the baseline clips against a reference (CP3, CP9-CP11).
 
     python scripts/30e_evaluate_baselines.py --run-name cp3_ceiling
     python scripts/30e_evaluate_baselines.py --run-name cp7_v2a --systems real_audio mmaudio_noprompt silence \
@@ -15,6 +15,12 @@ wrong piece" (chance level for the metrics).
 --mask-dir DIR (e.g. data/interim/baseline_clips/strips): use only clips that have DIR/<clip>_valid.npy and
 score only notes/frames where it is True (camera cuts, dissolves). Applied to every system, so all are
 compared on exactly the same clips and time.
+
+Other clip sets (CP9): --clips data/interim/baseline_clips_guifir (or _magcil). Reference = <clips>/midi (GAPS:
+real MIDI) if it exists, else <clips>/transcriptions/real_audio (pseudo-GT: GAPS model on the real audio; the
+real_audio row is then 100 % by construction and real_audio@shuffled is the chance level). Override with
+--reference-dir. Clip length = clips.csv column length_s if present (magcil), else --length. Shuffled pairs use
+another piece/song/technique (first of the columns piece_id, song, technique in clips.csv).
 
 Writes outputs/runs/<YYYY-MM-DD>_<run-name>/{per_clip.csv, summary.csv, summary.md, args.json}.
 """
@@ -42,13 +48,19 @@ def main() -> None:
     p.add_argument("--shuffled", nargs="+", default=[], help="systems to also score with mismatched clips")
     p.add_argument("--clips", type=Path, default=CLIPS)
     p.add_argument("--mask-dir", type=Path, help="restrict to clips/frames with <clip>_valid.npy here")
-    p.add_argument("--length", type=float, default=8.0)
+    p.add_argument("--reference-dir", type=Path, help="default: <clips>/midi, else <clips>/transcriptions/real_audio")
+    p.add_argument("--length", type=float, default=8.0, help="clip length if clips.csv has no length_s column")
     args = p.parse_args()
 
     trans = args.clips / "transcriptions"
+    ref_dir = args.reference_dir or (args.clips / "midi" if (args.clips / "midi").is_dir() else trans / "real_audio")
+    label_source = "real MIDI" if ref_dir.name == "midi" else f"pseudo-GT ({ref_dir.name} transcription)"
+    print(f"reference: {ref_dir} [{label_source}]")
     systems = args.systems or sorted(d.name for d in trans.iterdir() if d.is_dir()) + ["silence"]
     with open(args.clips / "clips.csv") as f:
         clips = [r for r in csv.DictReader(f) if r["keep"] == "1"]
+    group = next(k for k in ("piece_id", "song", "technique", "clip_id") if k in clips[0])
+    length = {c["clip_id"]: float(c.get("length_s") or args.length) for c in clips}
     masks = {}
     if args.mask_dir:
         masks = {c["clip_id"]: np.load(args.mask_dir / f"{c['clip_id']}_valid.npy") for c in clips
@@ -61,7 +73,7 @@ def main() -> None:
         """First clip >= 3 positions later (cyclic) that belongs to another piece."""
         for k in range(3, len(clips) + 3):
             other = clips[(i + k) % len(clips)]
-            if other["piece_id"] != clips[i]["piece_id"]:
+            if other[group] != clips[i][group]:
                 return other
         raise ValueError("need clips from at least two pieces")
 
@@ -70,7 +82,7 @@ def main() -> None:
     for system in systems:
         missing = 0
         for i, c in enumerate(clips):
-            ref = M.load_notes(args.clips / "midi" / f"{c['clip_id']}.mid")
+            ref = M.load_notes(ref_dir / f"{c['clip_id']}.mid")
             src_system, src_clip = system, c["clip_id"]
             if system.endswith("@shuffled"):
                 src_system, src_clip = system[: -len("@shuffled")], partner(i)["clip_id"]
@@ -82,8 +94,8 @@ def main() -> None:
                     missing += 1
                     continue
                 est = M.load_notes(f)
-            rows.append({"system": system, "clip_id": c["clip_id"], "piece_id": c["piece_id"],
-                         **M.evaluate(ref, est, args.length, valid=masks.get(c["clip_id"]))})
+            rows.append({"system": system, "clip_id": c["clip_id"], "group": c[group],
+                         **M.evaluate(ref, est, length[c["clip_id"]], valid=masks.get(c["clip_id"]))})
         if missing:
             print(f"WARNING: {system}: {missing} clips without transcription (skipped)")
 
@@ -117,9 +129,9 @@ def main() -> None:
         cells = [f"{100 * s[k]:.1f}" if k in pct else (f"{s[k]:.1f}" if k == "n_est" else f"{s[k]:.3f}")
                  for k in MAIN]
         lines.append(f"| {s['system']} | {s['clips']} | " + " | ".join(cells) + " |")
-    md = ("Mean over clips. F1/P/R/frame in %, onset tolerance 50/100 ms (mir_eval, onsets only unless "
+    md = (f"Clips: {args.clips}. Reference: {ref_dir} [{label_source}].\n\nMean over clips. F1/P/R/frame in %, onset tolerance 50/100 ms (mir_eval, onsets only unless "
           "'offset'), frame F1 at 25 fps, timing_f50 = pluck-time F1 ignoring pitch; chroma_sim and onset_corr in [0, 1]; n_est = notes per clip "
-          f"(GT mean {np.mean([r['n_ref'] for r in rows]):.1f}).\n\n" + "\n".join(lines) + "\n")
+          f"(reference mean {np.mean([r['n_ref'] for r in rows]):.1f}).\n\n" + "\n".join(lines) + "\n")
     # matched vs shuffled: does the system's output depend on *this* clip? (paired over clips)
     tests = []
     for base in args.shuffled:
@@ -137,6 +149,7 @@ def main() -> None:
                + "\n".join(tests) + "\n")
     (out / "summary.md").write_text(md)
     (out / "args.json").write_text(json.dumps({**vars(args), "clips": str(args.clips), "systems": systems,
+                                               "reference_dir": str(ref_dir), "label_source": label_source,
                                                "mask_dir": str(args.mask_dir) if args.mask_dir else None}, indent=2))
     print(md)
     print(f"written to {out}")

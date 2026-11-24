@@ -8,7 +8,8 @@ GuiFiR test tabs are manual and mark picking moments (string + fret + capo). For
     sounding  a note of that pitch is active at the tab frame
     chroma    like onset, pitch class only
 Recall only: the tab is sparse, so extra notes cannot be penalised. String order and capo handling are not
-documented; all readings in ``clips_guifir.TAB_VARIANTS`` are scored and the best one (on the reference) is used.
+documented; all readings in ``clips_guifir.TAB_VARIANTS`` are scored (printed); CP7 found frame_tab[0] = high E
++ capo, which is the default for every system (same reading for all, so systems are comparable).
 
 Writes <clips-dir>/tab_check_<system>.csv (per clip, best variant) and prints the summary.
 Also draws <clips-dir>/plots/tab_<clip>.png (transcription piano roll + tab pitches) for --plots clips.
@@ -53,7 +54,8 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--clips-dir", type=Path, default=CLIPS)
     p.add_argument("--system", default="real_audio")
-    p.add_argument("--variant", default=None, help="tab reading; default: best on this system")
+    p.add_argument("--variant", default="high_first+capo",
+                   help="tab reading (CP7: frame_tab[0] = high E, + capo); 'best' = best on this system")
     p.add_argument("--plots", type=int, default=3)
     args = p.parse_args()
 
@@ -70,7 +72,7 @@ def main() -> None:
     print("\ntab reading        onset  sounding  chroma   (share of tab pitches found)")
     for v, t in totals.items():
         print(f"  {v:16s} {t['onset']:6.1%} {t['sounding']:8.1%} {t['chroma']:7.1%}")
-    variant = args.variant or max(totals, key=lambda v: totals[v]["onset"])
+    variant = max(totals, key=lambda v: totals[v]["onset"]) if args.variant == "best" else args.variant
     print(f"-> using '{variant}'")
 
     rows = []

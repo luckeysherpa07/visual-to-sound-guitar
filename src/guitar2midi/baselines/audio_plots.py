@@ -27,7 +27,7 @@ def log_spectrogram(x: np.ndarray, sr: int, fmax: float = 4000.0) -> tuple[np.nd
 
 
 def plot_spectrograms(audio: dict[str, Path], dst: Path, title: str = "", gt_notes: np.ndarray | None = None,
-                      duration: float = 8.0) -> None:
+                      duration: float = 8.0, ref_label: str = "GT notes") -> None:
     """One row per audio file (log-frequency axis up to 4 kHz). Optional GT notes (onset, offset, pitch)
     are drawn as white lines at their fundamental frequency on every row, to compare pitch and timing."""
     import matplotlib
@@ -50,7 +50,7 @@ def plot_spectrograms(audio: dict[str, Path], dst: Path, title: str = "", gt_not
                 ax.plot([on, off], [hz, hz], color="white", lw=0.8, alpha=0.7)
     axes[-1, 0].set_xlabel("time in clip (s)")
     axes[-1, 0].set_xlim(0, duration)
-    fig.suptitle(title + ("   (white lines = GT notes)" if gt_notes is not None else ""))
+    fig.suptitle(title + (f"   (white lines = {ref_label})" if gt_notes is not None else ""))
     fig.tight_layout()
     dst.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(dst, dpi=100)

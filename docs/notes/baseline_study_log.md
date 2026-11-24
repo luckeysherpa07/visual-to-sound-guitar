@@ -592,3 +592,121 @@ wrap (string damper) right after the nut, not a tracking error.
 
 Masked subset for CP9–CP11 on magcil: the 23 clips with strips (all frames valid), same rule as GAPS (74 clips).
 Every technique keeps ≥ 1 clip with strips (tapping: 1).
+
+---
+
+## CP9 — MMAudio on all datasets (2026-11-24)
+
+**Commands** (GAPS outputs from CP4 reused; same model `large_44k_v2`, seed 42)
+```
+python scripts/30c_run_mmaudio.py --clips-dir data/interim/baseline_clips_guifir      # env mmaudio
+python scripts/30c_run_mmaudio.py --clips-dir data/interim/baseline_clips_magcil
+python scripts/30d_transcribe.py --clips-dir <dir> --system <mmaudio_noprompt|mmaudio_prompt> --audio-dir <dir>/generated/<system>  # env amt
+python scripts/30e_evaluate_baselines.py --clips <dir> --run-name cp9_mmaudio_<ds>_masked --mask-dir <dir>/strips \
+    --systems real_audio mmaudio_noprompt mmaudio_prompt silence --shuffled real_audio mmaudio_noprompt
+python scripts/31a_check_guifir_tab.py --system <system>                              # GuiFiR only
+python scripts/30c_plot_spectrograms.py --clips-dir <dir>
+```
+Prompts per clip set (`mmaudio_prompt`, written to `generated/mmaudio_prompt/prompt.txt`): GAPS "solo classical
+guitar", GuiFiR "solo acoustic guitar", magcil "solo electric guitar". Clips are generated at their own length
+(magcil bend ≈ 3.4 s). 118 generations in ≈ 6 min.
+
+**Script changes.** `30c_run_mmaudio`, `30c_plot_spectrograms` take `--clips-dir`. `30e_evaluate_baselines`:
+reference = `<clips>/midi` (real MIDI) if present, else `transcriptions/real_audio` (pseudo-GT; printed and stored
+in `args.json` as `label_source`); per-clip length from `clips.csv` `length_s`; shuffled partner = another
+piece/song/technique. Regression check: re-running GAPS (`2026-11-24_cp9_mmaudio_gaps_masked`) gives a summary
+table identical to `2026-11-23_cp7_mmaudio_masked`. `31a_check_guifir_tab` now always uses the CP7 tab reading
+(high E first + capo) for every system.
+
+**Results** (masked subset = clips with strips; note F1 etc. in %, mean over clips):
+
+| dataset (reference) | clips | system | note F1@50 | note F1@100 | frame F1 | timing F1 | chroma sim | onset corr | notes/clip |
+|---|---|---|---|---|---|---|---|---|---|
+| GAPS (real MIDI) | 74 | real audio (ceiling) | 93.6 | 93.8 | 82.8 | 95.4 | 0.892 | 0.903 | 32.8 |
+| | | MMAudio, no prompt | 3.1 | 5.9 | 10.3 | 35.5 | 0.205 | 0.111 | 33.6 |
+| | | MMAudio, prompt | 3.0 | 5.9 | 10.6 | 35.7 | 0.203 | 0.105 | 33.9 |
+| | | real audio, other piece (chance) | 2.1 | 4.0 | 9.8 | 28.1 | 0.213 | −0.011 | 33.4 |
+| GuiFiR-Vid (pseudo-GT) | 32 | MMAudio, no prompt | 2.7 | 5.8 | 10.8 | 27.5 | 0.165 | 0.014 | 38.1 |
+| | | MMAudio, prompt | 2.8 | 5.3 | 11.0 | 28.0 | 0.170 | 0.030 | 38.4 |
+| | | real audio, other song (chance) | 1.6 | 3.5 | 9.4 | 29.3 | 0.196 | 0.048 | 31.5 |
+| magcil (pseudo-GT) | 23 | MMAudio, no prompt | 5.9 | 11.2 | 7.0 | 46.8 | 0.073 | 0.066 | 47.4 |
+| | | MMAudio, prompt | 6.6 | 12.6 | 8.4 | 49.9 | 0.114 | 0.083 | 43.4 |
+| | | real audio, other technique (chance) | 4.3 | 7.3 | 5.2 | 52.1 | 0.128 | 0.023 | 50.8 |
+
+(On the pseudo-GT sets the real-audio row is 100 by construction and is left out.)
+
+Matched vs shuffled MMAudio output (paired Wilcoxon): **GAPS** timing F1 35.5 vs 25.8, p = 4e-5, note F1 3.1 vs 1.6, p = 0.004;
+**GuiFiR** timing 27.5 vs 26.7 (p = 0.66), note F1 2.7 vs 1.7 (p = 0.11); **magcil** timing 46.8 vs 44.0 (p = 0.82),
+note F1 5.9 vs 3.2 (p = 0.075). Unmasked magcil (all 27 clips, `cp9_mmaudio_magcil_all27`): note F1 7.0 vs 4.1,
+p = 0.023, timing p = 0.55 — the same picture.
+
+**GuiFiR tab check** (share of manual tab pitches found as onsets ±100 ms; same tab reading for all):
+reference (real audio) **69.9 %**, MMAudio no prompt **6.1 %**, prompt **5.3 %**, chance (real-audio transcription
+of another song) **3.0 %**.
+
+**Reading.**
+- MMAudio produces plausible guitar audio on every dataset (spectrograms: plucked acoustic on GuiFiR, distorted
+  electric on magcil, sustained notes and strong onsets) but **the notes are not the played notes** anywhere:
+  note F1 3–7 %, at or just above the chance level of the same dataset.
+- On GAPS the visual signal was mainly rhythm (timing F1 +10 points over the shuffled output, onset correlation 0.11 vs −0.01). On GuiFiR and magcil
+  even that disappears: MMAudio's onset timing is no better than with the video of another piece. Plausible
+  reasons: GuiFiR clips are tutorial videos (the hand is small in the frame, tab overlays dominate), magcil is fast
+  playing (8–10 notes/s; picking is too fast for MMAudio's 8 fps CLIP / 25 fps sync features to follow).
+- The prompt changes nothing significant (magcil +0.7 points note F1, within noise).
+- On magcil the chance level of timing F1 is high (52 %) because the exercises are fast, even streams of notes,
+  so any dense note stream matches half of the onsets; timing F1 must always be read against its chance row.
+
+Outputs: `outputs/runs/2026-11-24_cp9_mmaudio_{gaps,guifir,magcil}_masked/`, `…_magcil_all27/`;
+listening examples + spectrograms in `<clips-dir>/examples/`; tab check in
+`data/interim/baseline_clips_guifir/tab_check_<system>.csv`.
+
+---
+
+## CP10 — V2N zero-shot on all datasets + re-check of the 0.0 (2026-11-24)
+
+**Commands** (env v2n unless noted)
+```
+python scripts/30g_run_v2n.py --clips-dir <dir> [--flip none|h|v|hv] [--layout mid|top] [--norm]
+python scripts/30g_strip_stats.py                       # input statistics piano vs guitar strips
+python scripts/30g_v2n_recheck.py --run-name cp10_v2n_recheck
+python scripts/30e_evaluate_baselines.py --clips <dir> --run-name cp10_v2n_<ds>_masked \
+    --systems real_audio v2n_zeroshot silence --mask-dir <dir>/strips          # env guitar2midi
+python scripts/31a_check_guifir_tab.py --system v2n_zeroshot                    # env guitar2midi
+```
+
+**Zero-shot result (default strips, as in CP6).** GuiFiR-Vid 32 clips: **0 notes**; magcil 23 clips: **0 notes**;
+GAPS 74 clips: 1 note (CP6). All metrics 0.0 = silence on all three datasets; GuiFiR tab recall 0.0 %.
+
+**Re-check of the 0.0 (Luckey's open point from CP6), every item of the CP6 checklist done:**
+1. *Strip layout / orientation.* V2N's piano crop (`data/preprocess_video.py`): keyboard corners map to the strip
+   corners with `bottom_margin: 100` px added below the near edge, so the keys fill the top of the strip and the
+   hands come in from below. Ours: neck in the middle half, nut left, high E on top. Tested (new
+   `v2n.transform_strips`): flips none / h (nut right) / v (low E on top) / hv (rotated 180°) × layouts mid (ours) /
+   top (neck in the top 2/3 + margin below, piano-like; with v the fretting fingers come from below as on the piano).
+2. *Input statistics* (`30g_strip_stats.py`, run `2026-11-24_cp10_strip_stats`): our strips are darker and flatter
+   than V2N's piano strips — median frame mean 94–113 vs 155, std 54–60 vs 85, edge density 0.30–0.37 vs 0.45.
+   → added variant `--norm`: every frame rescaled to the piano mean/std. Total: 4 flips × 2 layouts × 2 norm =
+   **16 variants × 3 datasets = 48 runs**.
+3. *Lower thresholds* (diagnostic only) 0.5 / 0.2 / 0.1 / 0.05, plus threshold-free tests: correlation of V2N's
+   onset activity with the reference onsets (timing: max over pitches; pitch: full 88-key onset roll ±1 frame),
+   matched clip vs a clip of another piece, paired Wilcoxon.
+
+Result (run `2026-11-24_cp10_v2n_recheck`, full table in its `summary.md`):
+- **No variant produces notes**: at threshold 0.5 at most 6 notes on a whole dataset (GuiFiR hv/mid/norm), mostly
+  0–1. Median max onset probability per clip 0.002–0.07; occasional single spikes up to 0.95.
+- **Onset F1 is 0.0 for all 48 runs even at threshold 0.05** (≤ 3 notes per clip there); timing F1 ≤ 2.6 %.
+- **No timing or pitch signal without a threshold**: matched r between −0.10 and +0.01, never above the shuffled
+  r in a meaningful way. Only 2 of 96 tests reach p < 0.05 (GAPS default timing p = 0.033, GuiFiR h/top timing
+  p = 0.011), and both go the *wrong* way (matched clip correlates less than the shuffled one) — what 96 tests give
+  by chance. (In CP6 the same GAPS check, done with a different onset curve, gave p = 0.67; neither shows a signal.)
+- The onset-probability maps (`<clips-dir>/plots/v2n/*`) show static horizontal bands at fixed pitches that do not
+  change when notes are played, for every variant.
+
+**Conclusion.** The 0.0 is not caused by our strip orientation, layout or brightness: V2N's piano model gives no
+note, timing or pitch signal on guitar strips in any of the 16 variants on any of the 3 datasets, while the same
+wrapper reproduces V2N exactly on piano (CP6 positive control). V2N zero-shot = silence is the final baseline
+result; the row in the results table uses the default strips (variants only in the text / appendix).
+
+**Code.** `v2n.transform_strips` (flip / layout / norm), `v2n.plot_roll(ref_label=…)`; `30g_run_v2n.py` takes
+`--clips-dir --flip --layout --norm --system` (variant outputs in `transcriptions/v2n_zeroshot_<flip>_<layout>[_norm]`,
+`v2n_probs/<system>/`); new `30g_v2n_recheck.py`, `30g_strip_stats.py`. Default run unchanged (GAPS CP6 outputs kept).

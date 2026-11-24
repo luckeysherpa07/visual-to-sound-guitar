@@ -1,6 +1,8 @@
 """CP5 step 2: track the clicked fretboard corners through each clip and warp to 800x144 strips (V2N input).
 
     python scripts/30f_make_v2n_strips.py
+    python scripts/30f_make_v2n_strips.py --clips-dir data/interim/baseline_clips_magcil \
+        --annotations data/labels/fretboard_corners/magcil_baseline_EVAL_ONLY.jsonl
 
 Inputs: data/interim/baseline_clips/shots.json (from 30f_prepare_strip_frames.py) and the clicked corners
 data/labels/fretboard_corners/gaps_test_baseline_EVAL_ONLY.jsonl (from 01b_annotate_corners.py).
@@ -30,14 +32,17 @@ ANN = Path("data/labels/fretboard_corners/gaps_test_baseline_EVAL_ONLY.jsonl")
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--clips-dir", type=Path, default=CLIPS)
     p.add_argument("--annotations", type=Path, default=ANN)
-    p.add_argument("--out", type=Path, default=CLIPS / "strips")
+    p.add_argument("--out", type=Path, default=None, help="default: <clips-dir>/strips")
     p.add_argument("--min-coverage", type=float, default=0.9, help="flag clips with fewer tracked frames")
     args = p.parse_args()
+    clips_dir = args.clips_dir
+    args.out = args.out or clips_dir / "strips"
 
-    shots = json.loads((CLIPS / "shots.json").read_text())
+    shots = json.loads((clips_dir / "shots.json").read_text())
     invalid: dict[str, list[tuple[int, int]]] = {}
-    inv_file = CLIPS / "invalid_frames.txt"
+    inv_file = clips_dir / "invalid_frames.txt"
     if inv_file.exists():
         for ln in inv_file.read_text().splitlines():
             parts = ln.split("#")[0].split()
@@ -58,7 +63,7 @@ def main() -> None:
             print(f"{cid}: skipped (fretboard not usable)")
             continue
         ref = int(re.search(r"f(\d+)\.png$", r["image"]).group(1))
-        frames = read_frames(CLIPS / "video" / f"{cid}.mp4")
+        frames = read_frames(clips_dir / "video" / f"{cid}.mp4")
         corners, tracked, inliers = T.track_corners(frames, ref, np.array(r["corners"]), shot=tuple(shots[cid]["shot"]))
         valid = ~np.isnan(corners[:, 0, 0])
         for a0, b0 in invalid.get(cid, []):

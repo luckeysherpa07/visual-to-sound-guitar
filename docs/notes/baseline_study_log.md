@@ -529,3 +529,46 @@ which is the GuiFiR "ceiling" for that column.
 `scripts/31a_make_guifir_clips.py`, `scripts/31a_check_guifir_tab.py`; `30d_transcribe.py --clips-dir`;
 tracking-sheet drawing moved from `30f_make_v2n_strips.py` into `fretboard_tracking.tracking_block/save_sheet`
 (30f output unchanged); `clips.cut_video(max_width=...)`.
+
+---
+
+## CP8 — magcil preprocessing (2026-11-24, part 1: clips + reference; strips wait for corner clicks)
+
+**Data.** No download: `~/Downloads/guitar_style_dataset-v1.0.0.zip` (GitHub commit `eb27d7b`) extracted unchanged
+to `data/raw/magcil/` (14 GB, 49 s; `SOURCE.txt` records the origin). Paper copied to
+`docs/papers/magcil_guitar_style_dataset.pdf` (Mitsou et al., Data in Brief 52, 2024; CC BY-NC-ND 4.0).
+549 recordings, **one guitarist**, smartphone video (1080p, 30 fps), home studio; 3 electric guitars (carvin,
+palm-bay, rwg; humbuckers) × 3 amp simulations (dc-modern, plexiglass, sl100); 9 techniques. The wav files were
+extracted from the mp4s. Durations differ a lot by technique: bend 2–5 s, alternate picking / legato / tapping /
+sweep median 3–4 s (max 10–22 s), hammer-on / pull-off / slide 17–42 s. Some mp4s carry `rotate=180` metadata
+(OpenCV ignores it on the raw file, ffmpeg applies it when cutting → clips are upright); some are mirrored (front
+camera). View: close-up, front, fretboard large and fully visible in almost all frames.
+
+**Clips** (`scripts/31b_make_magcil_clips.py` → `data/interim/baseline_clips_magcil/`): 3 per technique, one per
+guitar/amp pair (carvin/dc-modern, palm-bay/plexiglass, rwg/sl100), the longest recording of each pair, centred
+window of 8 s; recordings shorter than 8 s are used whole (minus 0.1 s at each end) → **27 clips, 3.4 min**, 4 clips
+shorter than 8 s (3 bend clips of 3.2–3.4 s, one vibrato clip of 7.3 s); `clips.csv` has a `length_s` column
+(30e must use it in CP9). Sync of the wav vs the mp4's own audio: correlation ≥ 0.99; lag 0 except a constant
+−21 ms on 4 clips (1024 samples at 48 kHz = AAC priming), corrected as for GAPS. Contact sheet checked: all upright,
+guitar visible in every clip.
+
+**Reference transcription** (GAPS model on the real audio, env amt): median 63 notes per clip (7.9 notes/s).
+
+**Spot check** (`scripts/31b_spot_check_magcil.py`, no note labels exist):
+- Only 2 notes in total fall outside E2–E6.
+- Score check: the exercise MuseScore files give the pitch classes each exercise uses (recordings are played
+  from different positions, so best exercise of the class + best transposition). Median **98 %** of transcribed
+  notes are in that set vs **58 %** chance (set size / 12); scales/arpeggio classes 98–100 %, hammer-on/pull-off
+  83–94 % (chance 33 %), vibrato 62–78 % (chance 33–50 %: vibrato pitch wobble gives neighbour notes).
+- Bend clips get 1–2 notes: correct, each clip is one picked note bent upward (spectrogram).
+- Slide clips get only 9–18 notes in 8 s (1–2 notes/s) although the exercise is a scale: notes reached by sliding
+  are not re-picked, so the transcriber (trained on plucked classical guitar) mostly misses them. Reference is
+  incomplete there.
+- Distorted electric sound does not break the model: alternate picking spectrogram shows transcribed notes on the
+  played pitches.
+So the reference is usable on magcil, weaker on slide (missed notes) and vibrato (extra neighbour notes).
+
+**Strips: waiting for clicks.** `30f_prepare_strip_frames.py --clips-dir … --no-cuts` exported one frame per clip.
+`--no-cuts` because the cut detector flagged two "cuts" in `class_7_carvin_dc-modern_1_3_m1` that are a lighting
+change (blue light) in one continuous take (checked frame by frame); the recordings are single takes.
+Both 30f scripts now take `--clips-dir` (default GAPS, unchanged behaviour).

@@ -20,7 +20,7 @@ models are related work only. No public guitar video→MIDI model exists; that g
 Before the results table, the same baselines also run on two more guitar datasets, so "how bad are existing models"
 covers more than classical concert videos. Checkpoints were renumbered: **one checkpoint per dataset for all of its
 preprocessing (CP7, CP8), then one checkpoint per task that runs on all datasets (CP9–CP11)**. CP0–CP6 unchanged;
-old CP7 → CP11, old CP8 → CP12, old CP9 → CP13. Earlier names stay as they are (log section "CP7 (part 1)", run
+old CP7 → CP11, old CP8 → CP12, old CP9 → CP13 (later on 2026-11-24 the full-string strips were inserted as CP12, so the fine-tune is CP13 and the optional extensions CP14). Earlier names stay as they are (log section "CP7 (part 1)", run
 folder `2026-11-24_cp7_v2n_masked`).
 
 | | GAPS (CP0–6) | GuiFiR-Vid (CP7) | magcil guitar_style_dataset (CP8) |
@@ -36,7 +36,7 @@ Decisions (Luckey, 2026-11-24):
 - **Pseudo-GT in the same table.** GuiFiR and magcil have no real MIDI; they are scored against the GAPS model's
   transcription of their real audio. All three datasets go into the same CP11 table, with a label-source column
   (real MIDI / pseudo-GT) and a footnote. The ceiling row is 100 % by construction there, so the tab check (GuiFiR)
-  and a spot check (magcil) report how trustworthy the reference is. Trained-model test results (CP12+) stay on real MIDI only.
+  and a spot check (magcil) report how trustworthy the reference is. Trained-model main results (CP13+) stay on real MIDI; GuiFiR-Vid / magcil only as secondary, labelled cross-dataset rows.
 - **GuiFiR tab = check + extra column.** (a) How often the reference contains the tab pitch at tab frames (CP7);
   (b) a column "pitch recall at tab frames" for every system in the GuiFiR block. Recall only: the tab is sparse.
 - **Systems:** MMAudio (± prompt) and V2N zero-shot on both new datasets.
@@ -129,7 +129,28 @@ Each checkpoint ends with something you can **see** and a short stop where you c
 - Code: `scripts/30e_evaluate_baselines.py` → `outputs/runs/<date>_v2a_baseline/` + `thesis/tables/`.
 - **You see:** one table (note F1 @50/100 ms, frame F1, chroma similarity, onset correlation) + a one-paragraph summary for the supervisor.
 
-### CP12 — V2N fine-tuning pilot on guitar — was CP8
+### CP12 — Full-string strips nut → bridge (added 2026-11-24)
+- Why: the current strips (nut → fret 20) show the fretting hand, which mostly gives the pitch. *When* a note sounds is
+  decided by the picking hand over the soundhole / near the bridge, which is outside the strip; open strings, repeated
+  notes and which strings of a held chord are plucked cannot be seen from the fretting hand. (Piano differs: the same
+  finger chooses the pitch and starts the note.)
+- What: a second strip version covering the full string length, nut → bridge, for the test clips of all three
+  datasets (GAPS 74, GuiFiR-Vid 32, magcil 23). The bridge is 2 × the nut–fret-12 distance along the neck (fret 12
+  = half the scale length), mapped with the same tracked corners/homography → no new clicks, same tracking. 800×144
+  as before (each fret gets fewer pixels). GAPS/magcil via `30f_make_v2n_strips.py`, GuiFiR via `31a_make_guifir_clips.py`
+  (option for the strip extent; default output unchanged, new strips in `strips_full/`).
+- Check: tracking sheet with both strip versions. The bridge part is extrapolated beyond the clicked points (less
+  precise; perspective) and can be outside the frame in close-ups (black). Valid-frame masks stay the same as for
+  the fretboard strips, so old and new rows are compared on the same frames.
+- V2N zero-shot (released piano model, no training) on the **full-string (nut → bridge) strips**, one row per dataset,
+  next to the existing zero-shot rows on the fretboard strips (nut → fret 20). Expected silent like all CP10 variants;
+  it completes the picture. The real picking-hand test is CP13 run D (trained on full-string strips) vs run A.
+- Evaluation code, references, masks, results table unchanged; MMAudio and the existing V2N results are unaffected.
+- **You see:** tracking sheet (fretboard strip vs full-string strip per clip), V2N zero-shot rows on the full-string
+  strips (vs the fretboard-strip rows).
+- Effort: ~half a day. Also prepares the CP13 training strips (run D).
+
+### CP13 — V2N fine-tuning pilot on guitar — was CP8, then CP12
 - Strips for GAPS **train** split: click corners once per *video* (static cameras; ~200 clicks ≈ 1 h), flag videos
   where the guitar moves (corner check at a few frames). No FPE needed.
 - Model: V2N with the 88-key heads + slope prior replaced by guitar pitch heads (onset + frame, ~E2–B5) and a
@@ -143,11 +164,11 @@ Each checkpoint ends with something you can **see** and a short stop where you c
 - Code: `src/guitar2midi/model/` (V2N adaptation, reused later for the main model), `scripts/30h_finetune_v2n.py`.
 - **You see:** training curves + table rows: zero-shot vs fine-tuned vs scratch.
 
-### CP13 (optional) — Extend — was CP9
+### CP14 (optional) — Extend — was CP9, then CP13
 - More V2A models (HunyuanVideo-Foley / ThinkSound / Foley Music) if they run; own data later with the same scripts (own data = one more preprocessing CP). ~~magcil clips~~ moved to CP8 (2026-11-24).
 - **You see:** extra rows in the same table.
 
-After CP11: update CLAUDE.md and commit (the "how bad" result is ready for the supervisor). After CP12/CP13 again: update CLAUDE.md (paused FPE, new phase, scripts, envs, decision log) and commit.
+After CP11: update CLAUDE.md and commit (the "how bad" result is ready for the supervisor). After CP13/CP14 again: update CLAUDE.md (paused FPE, new phase, scripts, envs, decision log) and commit.
 
 ## Verification
 - Unit tests: GT vs itself → F1 = 1; silence → F1 = 0.
@@ -155,4 +176,4 @@ After CP11: update CLAUDE.md and commit (the "how bad" result is ready for the s
 - Listen to generated clips before trusting the numbers.
 
 ## Rough effort
-CP1–CP2: ~half a day (mostly downloads). CP3: ~half a day. CP4: ~half a day. CP5: ~2 h + 15 min clicking. CP6: ~half a day. CP7 (GuiFiR prep): ~half a day. CP8 (magcil prep): ~half a day + ~15 min clicking. CP9/CP10: a few hours each. CP11: a few hours. CP12: ~3–4 days (1 h clicking, model adaptation, training runs). CP13: open.
+CP1–CP2: ~half a day (mostly downloads). CP3: ~half a day. CP4: ~half a day. CP5: ~2 h + 15 min clicking. CP6: ~half a day. CP7 (GuiFiR prep): ~half a day. CP8 (magcil prep): ~half a day + ~15 min clicking. CP9/CP10: a few hours each. CP11: a few hours. CP12 (full-string strips): ~half a day. CP13: ~3–4 days (1 h clicking, model adaptation, training runs; + ~1 day for run D). CP14: open.

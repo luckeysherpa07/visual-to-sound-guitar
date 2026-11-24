@@ -5,7 +5,7 @@ Plan: [2026-11-23_baseline_study_plan.md](2026-11-23_baseline_study_plan.md). Sh
 
 **Renumbering (2026-11-24).** The study now also covers GuiFiR-Vid and magcil. New CP7 (GuiFiR preprocessing),
 CP8 (magcil preprocessing), CP9 (MMAudio, all datasets), CP10 (V2N, all datasets); the results table is now CP11,
-the V2N fine-tune CP12, optional extensions CP13. Sections below keep their original names; "CP7 (part 1)" is GAPS
+the V2N fine-tune CP12, optional extensions CP13. Later the same day the full-string strips (nut → bridge, picking hand visible) were inserted as CP12, so the fine-tune is CP13 and the extensions CP14. Sections below keep their original names; "CP7 (part 1)" is GAPS
 content of today's CP9/CP11. Plan: "Extension" section in the plan file.
 
 Note: `data/` and `outputs/` are not in git. Paths below are local; rerun the command to regenerate them.

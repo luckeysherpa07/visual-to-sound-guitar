@@ -66,9 +66,13 @@ for the thesis.
 
 ## Next steps
 
-- **V2N fine-tuning pilot (CP12, ~4 days):** keep V2N's architecture, train it on GAPS train-split fretboard
+- **V2N fine-tuning pilot (~4 days):** keep V2N's architecture, train it on GAPS train-split fretboard
   strips with real MIDI (piano initialisation vs ImageNet init vs scratch). This shows whether the architecture can
   learn guitar at all once it sees guitar data.
+- **Picking hand:** the current fretboard strips show the fretting hand (pitch) but not the picking hand (when a
+  note sounds; open strings, repeated notes). Before the pilot, a second strip version covering the full string
+  (nut → bridge) is made from the same tracking, and one pilot run uses it, to measure how much the picking hand
+  helps.
 - Then resume the GuiFiR fretboard / hand-pose work for a robust automatic crop (now with hand pose, as discussed).
 
 Caveats: the pseudo-GT datasets are small (32 and 23 clips) and their reference is imperfect (it misses repeated

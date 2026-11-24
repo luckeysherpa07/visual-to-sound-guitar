@@ -572,3 +572,23 @@ So the reference is usable on magcil, weaker on slide (missed notes) and vibrato
 `--no-cuts` because the cut detector flagged two "cuts" in `class_7_carvin_dc-modern_1_3_m1` that are a lighting
 change (blue light) in one continuous take (checked frame by frame); the recordings are single takes.
 Both 30f scripts now take `--clips-dir` (default GAPS, unchanged behaviour).
+
+### CP8 part 2 — strips (2026-11-24)
+
+Corners clicked by Luckey in the web tool (nut + fret 12, all 27 frames):
+`data/labels/fretboard_corners/magcil_baseline_EVAL_ONLY.jsonl` (evaluation only; exclude these recordings if magcil
+becomes training data). **4 skipped** (fretboard not usable on the clicked frame): `class_0_carvin_dc-modern_3_1`
+(alternate picking), `class_2_carvin_dc-modern_3_1` and `class_2_rwg_sl100_3_3` (tapping), `class_8_rwg_sl100_1_1`
+(bend). Then
+```
+python scripts/30f_make_v2n_strips.py --clips-dir data/interim/baseline_clips_magcil \
+    --annotations data/labels/fretboard_corners/magcil_baseline_EVAL_ONLY.jsonl
+```
+→ **23 clips with strips**, coverage 100 % in all (no lost frames, median 295–400 inliers; one continuous shot per
+clip). Tracking sheet checked; two quads that looked off at thumbnail size (`class_1_carvin_dc-modern_3_1`,
+`class_2_palm-bay_plexiglass_3_1`) were checked at full size: clicks correct, and the tapping strip is stable over
+the whole clip (frets stay in the same columns, frames 0–199). The black block at the left of some strips is a fret
+wrap (string damper) right after the nut, not a tracking error.
+
+Masked subset for CP9–CP11 on magcil: the 23 clips with strips (all frames valid), same rule as GAPS (74 clips).
+Every technique keeps ≥ 1 clip with strips (tapping: 1).

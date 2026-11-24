@@ -121,6 +121,28 @@ def corners_from_clicks(clicks: np.ndarray, fret: int = NUM_FRETS) -> np.ndarray
     return cv2.perspectiveTransform(TEMPLATE_CORNERS.reshape(-1, 1, 2), H).reshape(4, 2).astype(np.float64)
 
 
+# Bridge in template units (nut = 0, fret 20 = 1): the bridge is at the full scale length, fret n at
+# s * (1 - 2^(-n/12)), so bridge / fret20 = 1 / (1 - 2^(-20/12)) = 1.4598.
+BRIDGE_X = 1.0 / (1.0 - 2.0 ** (-NUM_FRETS / 12.0))
+
+
+def extend_corners(corners: np.ndarray, x_end: float = BRIDGE_X) -> np.ndarray:
+    """Corners (nut + fret 20) -> (nut, position ``x_end``) along the strings, same corner order.
+
+    ``x_end`` in template units (fret 20 = 1, bridge = ``BRIDGE_X``). Uses the homography of the 4 corners,
+    i.e. the neck plane is extrapolated beyond fret 20 (over the body to the bridge). Exact for a flat
+    plane up to click/tracking noise; the string fan-out beyond fret 20 follows the same projective taper.
+    Returns NaN corners if the input is NaN or the extension is degenerate (not a convex quad).
+    """
+    c = np.asarray(corners, dtype=np.float64).reshape(4, 2)
+    if np.isnan(c).any():
+        return np.full((4, 2), np.nan)
+    H = cv2.getPerspectiveTransform(TEMPLATE_CORNERS, c.astype(np.float32))
+    src = np.array([[0, 0], [0, 1], [x_end, 0], [x_end, 1]], dtype=np.float32)
+    out = cv2.perspectiveTransform(src.reshape(-1, 1, 2), H).reshape(4, 2).astype(np.float64)
+    return out if np.isfinite(out).all() and corners_valid(out) else np.full((4, 2), np.nan)
+
+
 def draw_grid(image: np.ndarray, grid: np.ndarray, thickness: int = 1) -> np.ndarray:
     """Draw strings (green), frets (blue), nut (red) and corners on a copy of ``image``."""
     out = image.copy()

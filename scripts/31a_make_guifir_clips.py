@@ -13,6 +13,7 @@ Output: data/interim/baseline_clips_guifir/
     contact_sheet.jpg         3 frames per clip
     strips/<clip>.npy         (T, 144, 800) uint8 strips at 25 fps, black outside the seeded shot
     strips/<clip>_valid.npy   (T,) bool, frames inside the seeded shot
+    strips/<clip>_corners.npy (T, 4, 2) tracked corners (nut + fret 20), NaN outside the shot
     strips/tracking_sheet.jpg tracked neck + strips, 3 frames per clip
 
 Next: reference transcription of the real audio (env amt)
@@ -42,6 +43,7 @@ def main() -> None:
     p.add_argument("--length", type=float, default=8.0)
     p.add_argument("--max-width", type=int, default=1280, help="downscale wider videos (1080p/4K) to this width")
     p.add_argument("--min-coverage", type=float, default=0.9, help="flag clips with fewer valid strip frames")
+    p.add_argument("--recut", action="store_true", help="re-cut video/audio even if the clip files exist")
     args = p.parse_args()
 
     by_clip = G.records_by_clip(args.split)
@@ -72,8 +74,10 @@ def main() -> None:
         cid = f"{src_id}_g1"  # one window per source clip
         src = vdir / f"{src_id}.mp4"
         v_out, a_out = out / "video" / f"{cid}.mp4", out / "audio" / f"{cid}.wav"
-        C.cut_video(src, v_out, start, args.length, max_width=args.max_width)
-        G.cut_audio(src, a_out, start, args.length)
+        if args.recut or not v_out.exists():
+            C.cut_video(src, v_out, start, args.length, max_width=args.max_width)
+        if args.recut or not a_out.exists():
+            G.cut_audio(src, a_out, start, args.length)
         frames = read_frames(v_out)
         h, w = frames[0].shape[:2]
         n_frames = len(frames)
@@ -113,6 +117,7 @@ def main() -> None:
         strips = np.stack([T.warp_strip(f, c) for f, c in zip(frames, corners)])
         np.save(out / "strips" / f"{cid}.npy", strips)
         np.save(out / "strips" / f"{cid}_valid.npy", valid)
+        np.save(out / "strips" / f"{cid}_corners.npy", corners.astype(np.float32))  # per frame (CP12)
 
         # tracking error at the other GT frames (mean corner distance, px at 640x360 like GuiFiR's FCD)
         errs = [float(np.linalg.norm(corners[e["frame"]] - np.array(e["corners"]), axis=1).mean() * 640 / w)

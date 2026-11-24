@@ -67,3 +67,17 @@ def test_metainfo_matches_grid_module():
     names = [info.keypoint_info[i]["name"] for i in range(126)]
     assert names == fg.KEYPOINT_NAMES
     assert np.allclose(info.joint_weights, fg.KEYPOINT_WEIGHTS)
+
+
+def test_extend_corners_to_bridge():
+    """Frontal (axis-aligned) fretboard: the bridge lies 1/(1-2^(-20/12)) = 1.46 nut-fret20 lengths from the nut."""
+    from guitar2midi.preprocessing.fretboard_grid import BRIDGE_X, extend_corners
+
+    # nut at x=100, fret 20 at x=500; high E at y=10, low E at y=50
+    corners = np.array([[100, 10], [100, 50], [500, 10], [500, 50]], float)
+    full = extend_corners(corners)
+    assert np.allclose(full[:2], corners[:2])
+    assert np.allclose(full[2:, 0], 100 + 400 * BRIDGE_X)
+    assert np.allclose(full[2:, 1], [10, 50])
+    assert abs(BRIDGE_X - 1.4598) < 1e-3
+    assert np.isnan(extend_corners(np.full((4, 2), np.nan))).all()

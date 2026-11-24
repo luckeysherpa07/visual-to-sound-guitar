@@ -734,3 +734,54 @@ than with a mismatched video (p < 0.05) — only on GAPS (note F1 p = 0.004, tim
 
 Supervisor summary: `docs/notes/2026-11-24_baseline_summary_for_supervisor.md` (short answer, setup, compact
 table, four findings, next steps, caveats). Not sent; for Luckey to review first.
+
+---
+
+## CP12 — Full-string strips nut → bridge (2026-11-24)
+
+**Why.** The fretboard strips (nut → fret 20) show the fretting hand, i.e. mostly the pitch. *When* a note sounds is
+decided by the picking hand over the soundhole / near the bridge, outside those strips; open strings, repeated
+notes and which strings of a held chord are plucked cannot be seen from the fretting hand.
+
+**Commands** (env guitar2midi, V2N in env v2n)
+```
+python scripts/30f_make_v2n_strips.py [--clips-dir … --annotations …]   # rerun once: now also saves <clip>_corners.npy
+python scripts/31a_make_guifir_clips.py                                   # rerun once (clip files reused, no re-cut)
+python scripts/30j_make_full_strips.py --clips-dir <clips-dir>            # → <clips-dir>/strips_full/
+python scripts/30g_run_v2n.py --clips-dir <clips-dir> --strips <clips-dir>/strips_full --system v2n_zeroshot_full
+python scripts/30e_evaluate_baselines.py --clips <clips-dir> --run-name cp12_v2n_full_<ds> \
+    --systems v2n_zeroshot v2n_zeroshot_full silence --mask-dir <clips-dir>/strips
+```
+
+**How.** The tracked corners (nut + fret 20) per frame are now saved (`strips/<clip>_corners.npy`; the reruns of
+30f / 31a reproduce all 129 existing strip files byte-identically, checked with md5). `fretboard_grid.extend_corners`
+maps the template neck plane (nut = 0, fret 20 = 1) through the corner homography and takes the points at
+`BRIDGE_X = 1 / (1 − 2^(−20/12)) = 1.46` (bridge = full scale length, fret 20 at 1 − 2^(−20/12) of it); unit-tested
+on a frontal neck. Same strip format (800×144, nut left, high E on top, strings in the middle half); fret 20 now at
+x ≈ 548. Same valid-frame masks as the fretboard strips, so old and new rows use the same frames.
+
+**Check** (`strips_full/tracking_sheet.jpg`, full-size examples `outputs/figures/full_strip_examples_*.jpg`):
+- **Geometry is right:** on a classical guitar in GuiFiR (`classic_Chopin_3_g1`) the extrapolated end lands exactly
+  on the bridge saddle; soundhole and plucking fingers appear where expected in wide shots (GAPS `043_bc1wc_c2`,
+  GuiFiR `YlangYlang_9_g1`).
+- **Picking hand visible** in wide / medium shots: GAPS and GuiFiR mostly, magcil too (electric guitars have 24
+  frets, so the strip passes the end of the fretboard to the pickups, where the picking hand is).
+- **Out of frame in close-ups:** in tight GAPS close-ups (`051_rc1wc_c1`, `263_cw1wc_c1`) the body / bridge is
+  outside the camera frame → the right part of the strip is black and the picking hand is not visible. A camera
+  limitation, not a bug. Black share of the full-string strips (valid frames): GAPS median 5 % (mean 9 %; 16/74
+  clips > 20 %, 1 > 40 %), GuiFiR median 0 % (2/32 > 20 %), magcil median 21 % (13/23 > 20 %, none > 40 %; the bridge
+  is outside the phone frame in every clip, the picking hand over the pickups is still in). Both bridge corners
+  inside the image: GAPS median 14 % of frames, GuiFiR 34 %, magcil 0 % — usually only the far end is cut off.
+- No degenerate extensions (0 frames).
+
+**V2N zero-shot on the full-string strips:** **0 notes** on all three datasets (GAPS 74, GuiFiR 32, magcil 23 clips;
+max onset prob median 0.002–0.007), all metrics 0.0 — same as the fretboard strips (runs
+`2026-11-24_cp12_v2n_full_{gaps,guifir,magcil}`). As expected: the piano model has never seen a guitar, so showing
+the picking hand does not help it. The real picking-hand test is CP13 run D (trained on full-string strips) vs run A.
+
+**For CP13.** Full-string strips work from the same clicks/tracking, so run D's training strips cost no extra
+annotation. Expect the picking-hand benefit mainly on wide shots; on close-ups (part of GAPS) the strip end is black.
+
+**Code.** `fretboard_grid.BRIDGE_X`, `extend_corners` (+ unit test); 30f and 31a save `<clip>_corners.npy` (31a
+reuses existing clip files unless `--recut`); new `scripts/30j_make_full_strips.py`; 30g_run_v2n and 30g_strip_stats
+skip `*_corners.npy` when listing clips.

@@ -45,7 +45,7 @@ def main() -> None:
     for name, d in DATASETS.items():
         frames = []
         for f in sorted((d / "strips").glob("*.npy")):
-            if f.stem.endswith("_valid"):
+            if f.stem.endswith(("_valid", "_corners")):
                 continue
             s = np.load(f)
             valid = np.load(f.with_name(f"{f.stem}_valid.npy")).astype(bool)[: len(s)]

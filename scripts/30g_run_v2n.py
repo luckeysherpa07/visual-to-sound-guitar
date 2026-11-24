@@ -47,7 +47,7 @@ def main() -> None:
     default = args.flip == "none" and args.layout == "mid" and not args.norm
     system = args.system or ("v2n_zeroshot" if default else
                              f"v2n_zeroshot_{args.flip}_{args.layout}" + ("_norm" if args.norm else ""))
-    clips = sorted(f.stem for f in strips_dir.glob("*.npy") if not f.stem.endswith("_valid"))
+    clips = sorted(f.stem for f in strips_dir.glob("*.npy") if not f.stem.endswith(("_valid", "_corners")))
     if args.limit:
         clips = clips[:args.limit]
     plots = args.plots if args.plots is not None else clips[:: max(len(clips) // 3, 1)][:3]

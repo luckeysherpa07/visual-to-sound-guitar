@@ -8,6 +8,8 @@ Inputs: data/interim/baseline_clips/shots.json (from 30f_prepare_strip_frames.py
 data/labels/fretboard_corners/gaps_test_baseline_EVAL_ONLY.jsonl (from 01b_annotate_corners.py).
 Writes data/interim/baseline_clips/strips/
     <clip>.npy           (T, 144, 800) uint8 grayscale strips at 25 fps; black where not valid
+    <clip>_corners.npy   (T, 4, 2) float32 tracked corners (nut + fret 20), NaN where not valid (used by
+                         30j_make_full_strips.py for the nut -> bridge strips)
     <clip>_valid.npy     (T,) bool: frame has a correct fretboard view (inside the clicked shot and not listed
                          in data/interim/baseline_clips/invalid_frames.txt, e.g. dissolves). Evaluation of the
                          baseline is restricted to these frames (30e --mask-dir).
@@ -72,6 +74,7 @@ def main() -> None:
         strips = np.stack([T.warp_strip(f, c) for f, c in zip(frames, corners)])
         np.save(args.out / f"{cid}.npy", strips)
         np.save(args.out / f"{cid}_valid.npy", valid)
+        np.save(args.out / f"{cid}_corners.npy", corners.astype(np.float32))  # per frame, NaN = invalid (CP12)
         a, b = shots[cid]["shot"]
         in_shot = inliers[a:b][np.arange(a, b) != ref]
         coverage = float((tracked & valid).mean())

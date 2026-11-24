@@ -710,3 +710,27 @@ result; the row in the results table uses the default strips (variants only in t
 **Code.** `v2n.transform_strips` (flip / layout / norm), `v2n.plot_roll(ref_label=…)`; `30g_run_v2n.py` takes
 `--clips-dir --flip --layout --norm --system` (variant outputs in `transcriptions/v2n_zeroshot_<flip>_<layout>[_norm]`,
 `v2n_probs/<system>/`); new `30g_v2n_recheck.py`, `30g_strip_stats.py`. Default run unchanged (GAPS CP6 outputs kept).
+
+---
+
+## CP11 — Results table + supervisor summary (2026-11-24)
+
+**Commands** (env guitar2midi)
+```
+python scripts/30e_evaluate_baselines.py --clips <clips-dir> --run-name cp11_<gaps|guifir|magcil> --mask-dir <clips-dir>/strips \
+    --systems real_audio mmaudio_noprompt mmaudio_prompt v2n_zeroshot silence --shuffled real_audio mmaudio_noprompt
+python scripts/30i_results_table.py
+```
+One 30e run per dataset with all systems (numbers identical to the CP9/CP10 runs). `30i_results_table.py` reads
+them, adds the GuiFiR tab-recall column (same shuffled pairing as 30e) and the paired Wilcoxon tests MMAudio vs
+mismatched video, and writes `thesis/tables/baseline_results.tex` (booktabs + `multirow`, now loaded in
+`thesis/main.tex`; scaled to `\textwidth`; not compiled here — no LaTeX installed) plus
+`outputs/runs/2026-11-24_cp11_results_table/{table.md, table.csv, tests.csv}`.
+
+Table layout: one block per dataset (label source + clip count in the first column); rows real audio (GAPS:
+ceiling; pseudo-GT sets: only its tab recall, the note metrics would be 100 by construction), MMAudio ± prompt,
+V2N zero-shot, MMAudio with a mismatched video, chance (real audio of another piece), silence; * = MMAudio better
+than with a mismatched video (p < 0.05) — only on GAPS (note F1 p = 0.004, timing p = 4e-5, onset r p = 2e-4).
+
+Supervisor summary: `docs/notes/2026-11-24_baseline_summary_for_supervisor.md` (short answer, setup, compact
+table, four findings, next steps, caveats). Not sent; for Luckey to review first.

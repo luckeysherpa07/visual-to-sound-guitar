@@ -465,3 +465,67 @@ finalised.** Things to check then (none done yet):
 Next step after that: CP8 draft plan in [2026-11-24_v2n_guitar_adaptation_plan.md](2026-11-24_v2n_guitar_adaptation_plan.md)
 (train the V2N architecture on GAPS guitar strips; the released V2N uses no pretrained foundation model — its
 ResNet-18 is trained from scratch on piano — but the code has an ImageNet-22k ConvNeXt-T option).
+
+---
+
+## CP7 — GuiFiR-Vid preprocessing (2026-11-24)
+
+**Commands**
+```
+python scripts/31a_make_guifir_clips.py                                                   # env guitar2midi
+python scripts/30d_transcribe.py --clips-dir data/interim/baseline_clips_guifir --system real_audio   # env amt
+python scripts/31a_check_guifir_tab.py                                                    # env guitar2midi
+```
+Outputs in `data/interim/baseline_clips_guifir/`: `clips.csv`, `contact_sheet.jpg`, `video/ audio/ tab/`,
+`strips/` (+ `tracking_sheet.jpg`), `transcriptions/real_audio/`, `tab_check_real_audio.csv`, `plots/tab_*.png`.
+
+**Clips.** GuiFiR-Vid test split = 100 clips of 10 s from 32 songs. One eval clip per song (the clip with the most
+tab events in its best 8 s window) → **32 clips, 4.3 min**, median 19 tab events per clip, 807 tab pitches in total.
+Source resolution 640×360 (23), 1920×1080 (6), 3840×2160 (3); clips are downscaled to ≤ 1280 px wide (new
+`max_width` option of `clips.cut_video`), 25 fps. Audio comes from the same mp4, so no sync correction is needed.
+No hard cuts in any clip. Most frames show tab/score overlays (tutorial videos); the strips only see the neck.
+
+**Strips without clicking.** The CP5 tracker is seeded with GuiFiR's GT corners (manual, nut + fret 20) of the tab
+frame closest to the window centre. The other 604 GT-corner frames in the windows measure the tracking error:
+median of clip medians **1.3 px** (640×360 scale), worst clip 10.3 px (`acoustic_Unholy_2_g1`), 7.0 px
+(`classic_Chopin_3_g1`), all others ≤ 3.6 px. Coverage 100 % in all 32 clips. Tracking sheet checked: all quads on the
+neck. (For comparison: GuiFiR's own FPE reports corner errors of several px; our tracker is near the annotation noise
+here because the cameras are static.)
+
+**Reference transcription** (GAPS model, `gaps_paper` checkpoint, on the real audio): median 29 notes per clip.
+
+**Tab check — what the tab is.** GuiFiR paper §III: val/test tablature is **manually** transcribed (only part of
+train is pseudo-GT from TabCNN), and annotated frames are picking moments. So the test tab is a real human label,
+but sparse (only picked strings at ~20 frames per clip) and without offsets. The string order is not documented, so
+4 readings were scored against the reference:
+
+| tab reading | onset ±100 ms | sounding | chroma |
+|---|---|---|---|
+| index 0 = **high E**, capo added | **69.9 %** | **83.0 %** | 71.5 % |
+| index 0 = high E, capo ignored | 20.2 | 27.6 | 22.2 |
+| index 0 = low E, capo added | 3.7 | 8.7 | 22.4 |
+| index 0 = low E, capo ignored | 5.3 | 13.0 | 16.4 |
+
+→ `frame_tab[0]` is the **high E string** and **fret + capo** gives the pitch (unambiguous). Time offset: tab frames
+are about one video frame (~30 ms) after the audio onset (global scan, best at −0.02 to −0.04 s); inside the ±100 ms
+tolerance, so no correction.
+
+**Result: the reference finds 69.9 % of the tab pitches as onsets (per clip median 79.6 %), 83 % as sounding notes.**
+8/32 clips below 50 %. Reasons seen in the plots / shift scan:
+- the transcriber merges repeated picks of the same pitch into one long note on steel-string guitar
+  (e.g. `YlangYlang_9_g1`, 81 % overall), so repeats count as misses — a reference weakness, not a tab error;
+- a few clips match only with the tab shifted by ~0.1 s (`acoustic_Mephisto_4_g1` 39 → 92 %, `acoustic_OnlyYou_2_g1`
+  50 → 88 %) or by −1 semitone (`acoustic_YourName_2_g1` 0 → 88 %: capo 6, maybe tuned down / capo off by one);
+- 4 clips (`CinnamonGirl_2`, `acoustic_CanonD_1`, `classic_StarWars_1`, `StudyInAMinor_3`) do not match under any
+  shift (≤ 36 %); the transcription has long sustained notes unrelated to the tab. Not resolved; kept in the set
+  (no cherry-picking), listed as low-agreement clips.
+
+**What this means for CP9–CP11.** On GuiFiR the pseudo-GT reference is decent but clearly weaker than on GAPS
+(GAPS ceiling 93.5 % onset F1 against real MIDI). Every GuiFiR row will be reported twice: note metrics against the
+reference, and tab onset recall (same tab reading for all systems). The reference itself gets 69.9 % tab recall,
+which is the GuiFiR "ceiling" for that column.
+
+**Code.** New `baselines/clips_guifir.py` (tab readings, window choice, audio cut, `tab_recall`),
+`scripts/31a_make_guifir_clips.py`, `scripts/31a_check_guifir_tab.py`; `30d_transcribe.py --clips-dir`;
+tracking-sheet drawing moved from `30f_make_v2n_strips.py` into `fretboard_tracking.tracking_block/save_sheet`
+(30f output unchanged); `clips.cut_video(max_width=...)`.

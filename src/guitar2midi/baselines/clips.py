@@ -63,11 +63,14 @@ def select_windows(onsets: np.ndarray, duration: float, n_clips: int = 3, length
 
 
 # ---------------------------------------------------------------- cutting
-def cut_video(src: Path, dst: Path, start: float, length: float, fps: int = FPS) -> None:
-    """Silent, frame-accurate cut resampled to ``fps`` (re-encoded H.264)."""
+def cut_video(src: Path, dst: Path, start: float, length: float, fps: int = FPS,
+              max_width: int | None = None) -> None:
+    """Silent, frame-accurate cut resampled to ``fps`` (re-encoded H.264).
+    ``max_width``: downscale wider videos to this width (aspect kept), e.g. 4K GuiFiR clips."""
     dst.parent.mkdir(parents=True, exist_ok=True)
+    vf = f"fps={fps}" + (f",scale='min({max_width},iw)':-2" if max_width else "")
     cmd = ["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{start:.3f}", "-i", str(src), "-t", f"{length:.3f}",
-           "-an", "-vf", f"fps={fps}", "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p", str(dst)]
+           "-an", "-vf", vf, "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p", str(dst)]
     subprocess.run(cmd, check=True)
 
 

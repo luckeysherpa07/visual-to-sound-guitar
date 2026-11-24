@@ -724,7 +724,7 @@ python scripts/30i_results_table.py
 One 30e run per dataset with all systems (numbers identical to the CP9/CP10 runs). `30i_results_table.py` reads
 them, adds the GuiFiR tab-recall column (same shuffled pairing as 30e) and the paired Wilcoxon tests MMAudio vs
 mismatched video, and writes `thesis/tables/baseline_results.tex` (booktabs + `multirow`, now loaded in
-`thesis/main.tex`; scaled to `\textwidth`; not compiled here — no LaTeX installed) plus
+`thesis/main.tex`). Compiled with tectonic (env `latex`): the first version (9 columns scaled to `\textwidth`) came out with a tiny font, so the dataset moved from a column to a header row above each block, headers became two short lines (Note F1 50/100 ms, …) and system names shorter → fits at `\small` without scaling, no overfull box; caption now states the clip length (8 s or whole recording, magcil bends ≈ 3 s) plus
 `outputs/runs/2026-11-24_cp11_results_table/{table.md, table.csv, tests.csv}`.
 
 Table layout: one block per dataset (label source + clip count in the first column); rows real audio (GAPS:

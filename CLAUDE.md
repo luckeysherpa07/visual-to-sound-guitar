@@ -227,6 +227,7 @@ thesis/        LaTeX source (main.tex, chapters/, figures/, tables/; build/ giti
 Environment (Miniforge installed at `~/miniforge3`, env `guitar2midi`, Python 3.10):
 `conda env create -f environment.yml && conda activate guitar2midi && bash scripts/setup_mmpose.sh`.
 Extra envs for the baseline study (each: `conda env create -f envs/<name>.yml`, then `pip install -e . --no-deps`): `amt` (GAPS audio-to-MIDI model), `mmaudio` (MMAudio V2A) and `v2n` (V2N; also needs the repo clone + checkpoint download listed in `envs/v2n.yml`). Separate because all need a recent torch (2.15), which breaks mmcv in `guitar2midi`. Scripts state which env they need.
+LaTeX preview (no sudo, no full TeX Live): env `latex` (`conda create -n latex -c conda-forge tectonic`); `thesis/build/preview/table_preview.tex` inputs a generated table → `tectonic table_preview.tex && pdftoppm -png -r 150 -singlefile table_preview.pdf table_preview` (build/ is gitignored).
 For the GuiFiR download also `pip install -e .[data]` (gdown, yt-dlp); for the corner annotation window `pip install -e .[annotate]` (python-xlib). Run tests with `python -m pytest tests/`.
 Pinned because MMPose is fragile: torch 2.1.2 + cu121, mmcv 2.1.0, mmengine 0.10.7, mmdet 3.3.0 (imported by mmpose heads), mmpose 1.3.2 with `--no-deps` (chumpy fails to build), numpy<2, setuptools<81 (mmengine needs `pkg_resources`).
 

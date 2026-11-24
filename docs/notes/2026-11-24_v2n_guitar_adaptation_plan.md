@@ -1,12 +1,15 @@
-# V2N on guitar — what to change (draft plan for CP8, 2026-11-24; now CP12 after the renumbering)
+# V2N on guitar — what to change (plan for CP12)
 
-Status: **draft, not approved yet.** Written after CP6 (V2N zero-shot = silence). To be reviewed before CP8 starts.
+Status: **draft, not approved yet.** Written 2026-11-24 after CP6 (then numbered CP8); updated 2026-11-24 after
+CP11: renumbered (old CP8 → CP12, old CP7 table → CP11 table) and evaluation extended to GuiFiR-Vid and magcil.
+To be reviewed before CP12 starts.
 
 
 ## Context
 
-CP6 showed that the released V2N checkpoint outputs silence on guitar strips (1 note in 74 clips). The question
-now: what has to change so the V2N *architecture* can be trained on guitar input?
+CP6/CP10 showed that the released V2N checkpoint outputs silence on guitar strips (GAPS 1 note in 74 clips,
+GuiFiR-Vid and magcil 0 notes; 16 strip variants re-checked). The question now: what has to change so the V2N
+*architecture* can be trained on guitar input, and how well does it do once it sees guitar data?
 
 **Correction on the "foundation model" point.** The released V2N does **not** use a pretrained foundation
 model. Its default feature extractor (`configs/oofv_1s/model/default.yaml`) is `S2SVisualFeatureExtractor`:
@@ -47,14 +50,16 @@ that picks `Transcriber_OnsetFrame` and the backbone.
   written as V2N TSV. Performer-level hold-out of ~10 % of train pieces as validation (CLAUDE.md: split by performer).
 - Output: `data/processed/v2n_guitar/processed_v2/{train,valid}/guitar_v2.hdf5` + `TSV/` (V2N's layout,
   JPEG q95 as in `data/preprocess_video.py`). Writer in `src/guitar2midi/baselines/v2n_data.py`.
+- Training data is **GAPS only** (real MIDI). GuiFiR-Vid and magcil are not used for training in CP12, so they
+  stay unseen test sets (no guitar type, recording style or player of theirs is seen in training).
 
 ### 2. Configs (`configs/model/v2n_guitar/`, Hydra, overriding V2N's `oofv_1s`)
 - `transcriber: model.transcriber.Transcriber_OnsetFrame`, `num_classes: 88`, `dim: 512`.
 - `train.loss.weights: {onset: 2, frame: 1}`; `report_to: [none]` (no wandb); `bf16`, `torch_compile` as V2N.
-- `max_steps` ~20k per run (V2N: 100k ≈ 2 days on RTX 5080; we have ~4 days for CP8 on an RTX 4080).
+- `max_steps` ~20k per run (V2N: 100k ≈ 2 days on RTX 5080; we have ~4 days for CP12 on an RTX 4080).
 - Eval callback: same 50 ms onset tolerance.
 
-### 3. Three runs (CP8 rows of the CP7 table)
+### 3. Three runs (CP12 rows of the CP11 results table)
 | run | backbone | init | why |
 |---|---|---|---|
 | A (main) | S2S ResNet-18 | V2N piano checkpoint, full fine-tune (onset/frame heads + backbone loaded, offset/velocity weights discarded) | does piano visual knowledge transfer? |
@@ -66,20 +71,49 @@ days → move to main experiments).
 
 ### 4. Training entry point (`scripts/30h_finetune_v2n.py`, env `v2n`)
 Thin wrapper: builds the Hydra cfg (V2N `oofv_1s` + our overrides), optional init checkpoint, calls V2N's
-`train.train(cfg)`; output dir `outputs/runs/<date>_cp8_v2n_<A|B|C>/` with merged config copied in.
+`train.train(cfg)`; output dir `outputs/runs/<date>_cp12_v2n_<A|B|C>/` with merged config copied in.
 
-### 5. Evaluation on the CP6 test clips
+### 5. Evaluation on all three baseline datasets
 Generalise `guitar2midi.baselines.v2n.V2NTranscriber` to take a model config + checkpoint (currently hard-wired
-to `oofv_1s` / `Transcriber_OnsetOffsetFrameVelocity`); `scripts/30g_run_v2n.py --config --checkpoint --system
-v2n_ft_A` → `transcriptions/v2n_ft_A/`; then `30e_evaluate_baselines.py --mask-dir .../strips` with all rows.
-Test clips stay EVAL_ONLY (GAPS test split never used for training).
+to `oofv_1s` / `Transcriber_OnsetOffsetFrameVelocity`); `scripts/30g_run_v2n.py` gets `--config --checkpoint`
+(it already has `--clips-dir --system`). For each finished run X ∈ {A, B, C}:
+
+```
+python scripts/30g_run_v2n.py --clips-dir <clips-dir> --config <run>/config.yaml --checkpoint <run>/best.safetensors --system v2n_ft_X
+```
+on the existing strips of all three clip sets (no new preprocessing, same masks as CP9–CP11):
+
+| Dataset | Clips | Reference | Role for CP12 |
+|---|---|---|---|
+| GAPS test split | 74 | real MIDI | **main result** (same guitar type and video source as training, unseen performers/pieces) |
+| GuiFiR-Vid test split | 32 | pseudo-GT (real-audio transcription) + manual tab | **cross-dataset**: steel-string acoustic, tutorial videos, different camera/hands; the tab recall column is an independent, human-labelled check |
+| magcil | 23 | pseudo-GT (real-audio transcription) | **cross-dataset**: electric guitar, one player, fast technique exercises, smartphone close-up |
+
+Then:
+- `30e_evaluate_baselines.py --clips <clips-dir> --run-name cp12_<ds> --mask-dir <clips-dir>/strips` with all
+  systems (baselines + `v2n_ft_A/B/C`), plus `--shuffled v2n_ft_A` (does the fine-tuned model follow *this*
+  clip's video, or does it output a generic guitar note stream?).
+- `31a_check_guifir_tab.py --system v2n_ft_X` for the GuiFiR tab recall.
+- `30i_results_table.py` gets the `v2n_ft_*` rows (and their "other video" control) in every dataset block, so the
+  CP11 table becomes the CP12 table with the same layout.
+
+Reading the cross-dataset rows: GuiFiR/magcil numbers are against a pseudo-GT whose own quality is limited (it finds
+70 % of GuiFiR's manual tab notes; it misses slid notes on magcil). So a fine-tuned model can score at most around
+the reference's agreement with the truth there; compare systems with each other and with the chance row, not with
+100 %. A large drop from GAPS to GuiFiR/magcil means the model has learned GAPS-specific appearance (nylon strings,
+concert videos), not guitar playing in general — useful to know before the main experiments (motivates adding
+GuiFiR/magcil-like data or augmentation there).
+
+Test clips of all three sets stay EVAL_ONLY: GAPS test split, GuiFiR test split and the 27 magcil eval
+recordings are never used for training.
 
 ## Files
 
 - New: `src/guitar2midi/baselines/v2n_data.py` (strips + MIDI → V2N HDF5/TSV), `scripts/30h_make_train_strips.py`,
   `scripts/30h_finetune_v2n.py`, `configs/model/v2n_guitar/*.yaml`, `tests/test_v2n_data.py`.
 - Changed: `src/guitar2midi/baselines/v2n.py` (configurable model/checkpoint), `scripts/30g_run_v2n.py`
-  (`--config/--checkpoint/--system`), `CLAUDE.md`, `docs/notes/baseline_study_log.md`.
+  (`--config/--checkpoint`), `scripts/30i_results_table.py` (fine-tuned rows), `CLAUDE.md`,
+  `docs/notes/baseline_study_log.md`.
 - V2N repo stays unmodified (pinned a6408c4).
 
 ## Verification
@@ -89,5 +123,7 @@ Test clips stay EVAL_ONLY (GAPS test split never used for training).
 2. Visual check: label sheet (strip frames + piano roll from the HDF5 labels) for 3 train records, sync visible.
 3. Overfit sanity: run A on 1 record for ~300 steps → train onset F1 near 100 % (pipeline can learn).
 4. Load check for A: every non-offset/velocity key of the piano checkpoint is loaded (printed count).
-5. After training: piano rolls (existing `v2n.plot_roll`) for the 3 CP6 clips + table rows A/B/C vs zero-shot,
-   MMAudio, ceiling on the masked 74 clips.
+5. Wrapper check: the generalised `V2NTranscriber` with the original `oofv_1s` config + piano checkpoint still gives
+   exactly the CP6 outputs (positive control on PianoVAM, and v2n_zeroshot on GAPS unchanged).
+6. After training: piano rolls (existing `v2n.plot_roll`) for 3 clips per dataset + table rows A/B/C vs zero-shot,
+   MMAudio, ceiling/reference and chance on GAPS (74), GuiFiR-Vid (32) and magcil (23); GuiFiR tab recall per run.

@@ -137,7 +137,9 @@ Each checkpoint ends with something you can **see** and a short stop where you c
 - Compare: (a) V2N piano weights + **full fine-tune**, (b) same model **from scratch**, (c) optional: LoRA on the
   backbone. Full fine-tune is the main row: V2N is small (ResNet-18 + conv blocks + BiLSTM, no attention) and fits
   in 16 GB, so LoRA saves nothing important and fits conv/LSTM layers poorly.
-- Evaluate on the CP2 test clips; rows added to the CP11 table.
+- Evaluate on the existing strips of all three baseline sets: GAPS test clips (main, real MIDI) and, as unseen
+  cross-dataset tests, GuiFiR-Vid and magcil (pseudo-GT + GuiFiR tab recall); rows added to every block of the
+  CP11 table. Training uses GAPS train only. Details: `2026-11-24_v2n_guitar_adaptation_plan.md` (updated 2026-11-24).
 - Code: `src/guitar2midi/model/` (V2N adaptation, reused later for the main model), `scripts/30h_finetune_v2n.py`.
 - **You see:** training curves + table rows: zero-shot vs fine-tuned vs scratch.
 

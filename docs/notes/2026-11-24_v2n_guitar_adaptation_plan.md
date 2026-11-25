@@ -5,6 +5,10 @@ CP11: renumbered (old CP8 → CP12, old CP7 table → CP11 table) and evaluation
 then renumbered to CP13 (full-string strips inserted as CP12) and run D added (full-string strips, picking hand visible).
 To be reviewed before CP13 starts.
 
+**Renumbered 2026-11-25 (supervisor meeting): this is now CP16**, after CP13 (more V2A baselines), CP14 (V2M
+baselines) and CP15 (LoRA fine-tune of MMAudio). "CP13" below means CP16; run folders will be `<date>_cp16_v2n_<X>`.
+No LoRA on V2N (full fine-tune only). The GAPS train split is already downloaded (267/270 videos, 14.7 h).
+
 
 ## Context
 

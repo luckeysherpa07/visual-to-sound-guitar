@@ -150,25 +150,59 @@ Each checkpoint ends with something you can **see** and a short stop where you c
   strips (vs the fretboard-strip rows).
 - Effort: ~half a day. Also prepares the CP13 training strips (run D).
 
-### CP13 — V2N fine-tuning pilot on guitar — was CP8, then CP12
+### Extension (2026-11-25): more baselines and LoRA before the V2N training — supervisor meeting
+Supervisor (meeting 2026-11-25, notes: `2026-11-25_supervisor_meeting.md`): first more video → audio and video →
+MIDI baselines, then a LoRA fine-tune, then V2N trained on guitar, then an own model. New order: CP13 V2A
+baselines, CP14 V2M baselines, CP15 LoRA (MMAudio), CP16 V2N trained (was CP13), CP17 table + summary. The old
+optional CP14 is absorbed into CP13/CP14. LoRA only on the V2A model; V2N gets a full fine-tune only.
+
+### CP13 — More video → audio baselines, all datasets (added 2026-11-25)
+- Step 1 (stop for review): availability check for V2A **and** V2M candidates: HunyuanVideo-Foley, ThinkSound,
+  Foley Music, Audeo + 1–2 others; per model: public code, released weights, licence, fits 16 GB (or with
+  offloading / fp16), input requirements, rough effort. Then pick ~2 V2A models (this CP) and 1–2 V2M models (CP14).
+- Step 2: each chosen V2A model in its own conda env (`envs/<name>.yml`), same as MMAudio: silent clips of GAPS /
+  GuiFiR-Vid / magcil → audio (± the same text prompts) → `30d_transcribe` → `30e_evaluate_baselines` (masked,
+  shuffled-video control, GuiFiR tab recall).
+- **You see:** availability table, spectrograms / listening examples, rows per dataset.
+
+### CP14 — Video → MIDI baselines, all datasets (added 2026-11-25)
+- The 1–2 V2M models picked in CP13 step 1 (Foley Music: body/hand keypoints → MIDI; Audeo: piano top view →
+  MIDI, would get our strips like V2N). Output is MIDI, so scored directly with `30e` (no transcription step).
+- If none is runnable (no weights), they are discussed as related work only, with the reason.
+- **You see:** piano rolls, rows per dataset.
+
+### CP15 — LoRA fine-tune of a V2A model (MMAudio) on guitar (added 2026-11-25)
+- MMAudio (already installed, env `mmaudio`) + LoRA adapters on its transformer; base weights frozen. Training
+  data: GAPS train split (267 pieces with video, 14.7 h): 8 s windows of silent video + real audio, sync-corrected;
+  ~10 % of pieces held out by performer as validation.
+- Evaluated exactly like CP9 on all three test sets (generate → transcribe → evaluate), compared with MMAudio
+  zero-shot. Question: does it learn the right notes, or only better guitar timbre?
+- Detailed plan (LoRA rank / target layers, steps, memory) written before starting, like the V2N plan.
+- **You see:** training curves, spectrograms before/after, rows per dataset.
+
+### CP16 — V2N trained on guitar (full fine-tune, no LoRA) — was CP8, CP12, then CP13 (renumbered 2026-11-25)
 - Strips for GAPS **train** split: click corners once per *video* (static cameras; ~200 clicks ≈ 1 h), flag videos
   where the guitar moves (corner check at a few frames). No FPE needed.
 - Model: V2N with the 88-key heads + slope prior replaced by guitar pitch heads (onset + frame, ~E2–B5) and a
   fretboard position encoding. Velocity head dropped.
-- Compare: (a) V2N piano weights + **full fine-tune**, (b) same model **from scratch**, (c) optional: LoRA on the
-  backbone. Full fine-tune is the main row: V2N is small (ResNet-18 + conv blocks + BiLSTM, no attention) and fits
-  in 16 GB, so LoRA saves nothing important and fits conv/LSTM layers poorly.
+- Compare: runs A (piano init, full fine-tune), B (ConvNeXt-T ImageNet-22k), C (scratch), D (= A on full-string
+  strips). **No LoRA on V2N** (decided 2026-11-25): V2N is small (ResNet-18 + conv blocks + BiLSTM, no attention)
+  and fits in 16 GB, so LoRA saves nothing important and fits conv/LSTM layers poorly; LoRA is done on MMAudio (CP15).
 - Evaluate on the existing strips of all three baseline sets: GAPS test clips (main, real MIDI) and, as unseen
   cross-dataset tests, GuiFiR-Vid and magcil (pseudo-GT + GuiFiR tab recall); rows added to every block of the
   CP11 table. Training uses GAPS train only. Details: `2026-11-24_v2n_guitar_adaptation_plan.md` (updated 2026-11-24).
 - Code: `src/guitar2midi/model/` (V2N adaptation, reused later for the main model), `scripts/30h_finetune_v2n.py`.
 - **You see:** training curves + table rows: zero-shot vs fine-tuned vs scratch.
 
-### CP14 (optional) — Extend — was CP9, then CP13
-- More V2A models (HunyuanVideo-Foley / ThinkSound / Foley Music) if they run; own data later with the same scripts (own data = one more preprocessing CP). ~~magcil clips~~ moved to CP8 (2026-11-24).
-- **You see:** extra rows in the same table.
+### CP17 — Results table + summary, all systems (added 2026-11-25)
+- `30i_results_table.py` extended with the CP13–CP16 rows (V2A, V2M, MMAudio + LoRA, V2N A–D) in every dataset
+  block; updated supervisor summary.
+- **You see:** the full table.
 
-After CP11: update CLAUDE.md and commit (the "how bad" result is ready for the supervisor). After CP13/CP14 again: update CLAUDE.md (paused FPE, new phase, scripts, envs, decision log) and commit.
+~~CP14 (optional) — Extend~~: absorbed into CP13/CP14 on 2026-11-25 (more V2A models → CP13, Foley Music → CP14).
+Own data / own model: brainstorm after CP17 (see `2026-11-25_supervisor_meeting.md`).
+
+After CP11: update CLAUDE.md and commit (the "how bad" result is ready for the supervisor). After each later CP: update CLAUDE.md and the log, commit when asked.
 
 ## Verification
 - Unit tests: GT vs itself → F1 = 1; silence → F1 = 0.
@@ -176,4 +210,4 @@ After CP11: update CLAUDE.md and commit (the "how bad" result is ready for the s
 - Listen to generated clips before trusting the numbers.
 
 ## Rough effort
-CP1–CP2: ~half a day (mostly downloads). CP3: ~half a day. CP4: ~half a day. CP5: ~2 h + 15 min clicking. CP6: ~half a day. CP7 (GuiFiR prep): ~half a day. CP8 (magcil prep): ~half a day + ~15 min clicking. CP9/CP10: a few hours each. CP11: a few hours. CP12 (full-string strips): ~half a day. CP13: ~3–4 days (1 h clicking, model adaptation, training runs; + ~1 day for run D). CP14: open.
+CP1–CP2: ~half a day (mostly downloads). CP3: ~half a day. CP4: ~half a day. CP5: ~2 h + 15 min clicking. CP6: ~half a day. CP7 (GuiFiR prep): ~half a day. CP8 (magcil prep): ~half a day + ~15 min clicking. CP9/CP10: a few hours each. CP11: a few hours. CP12 (full-string strips): ~half a day. CP13 (V2A baselines): ~2–3 days incl. availability check. CP14 (V2M): ~1–2 days. CP15 (MMAudio LoRA): ~3–4 days. CP16 (V2N trained, was CP13): ~3–4 days (1 h clicking, model adaptation, training runs; + ~1 day for run D). CP17: a few hours.

@@ -8,6 +8,11 @@ CP8 (magcil preprocessing), CP9 (MMAudio, all datasets), CP10 (V2N, all datasets
 the V2N fine-tune CP12, optional extensions CP13. Later the same day the full-string strips (nut → bridge, picking hand visible) were inserted as CP12, so the fine-tune is CP13 and the extensions CP14. Sections below keep their original names; "CP7 (part 1)" is GAPS
 content of today's CP9/CP11. Plan: "Extension" section in the plan file.
 
+**Renumbering (2026-11-25, supervisor meeting).** More baselines and LoRA before the V2N training: CP13 more
+video → audio baselines, CP14 video → MIDI baselines, CP15 LoRA fine-tune of MMAudio, CP16 V2N trained on guitar
+(was CP13; full fine-tune only, no LoRA), CP17 results table + summary. Old optional CP14 absorbed into CP13/CP14.
+Meeting notes: [2026-11-25_supervisor_meeting.md](2026-11-25_supervisor_meeting.md).
+
 Note: `data/` and `outputs/` are not in git. Paths below are local; rerun the command to regenerate them.
 
 ---

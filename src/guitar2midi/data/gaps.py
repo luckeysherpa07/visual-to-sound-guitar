@@ -93,8 +93,14 @@ def download_video(row: dict, root: Path = GAPS_ROOT, max_height: int = 720) -> 
 
 
 def wav_duration(path: Path) -> float:
-    with wave.open(str(path)) as w:
-        return w.getnframes() / w.getframerate()
+    """Duration (s) of a wav; ffprobe for headers ``wave`` cannot read (WAVE_FORMAT_EXTENSIBLE, some train files)."""
+    try:
+        with wave.open(str(path)) as w:
+            return w.getnframes() / w.getframerate()
+    except wave.Error:
+        cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "json", str(path)]
+        return float(json.loads(subprocess.run(cmd, capture_output=True, text=True, check=True).stdout)
+                     ["format"]["duration"])
 
 
 def video_info(path: Path) -> dict:

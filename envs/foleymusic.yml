@@ -1,0 +1,33 @@
+# Foley Music (Gan et al., ECCV 2020) for CP15. Retrained on its own released data, then run on our clips.
+#   conda env create -f envs/foleymusic.yml && conda activate foleymusic && pip install -e . --no-deps
+# Code: git clone https://github.com/chuangg/Foley-Music ~/external/Foley-Music   (commit dcc2638, unmodified)
+# Data: curl -L -o ~/external/FoleyMusic_data/data_pose_midi.tar https://data.csail.mit.edu/clevrer/data_pose_midi.tar
+#       (3.0 GB; pose .npy [T, 3, 65, 1] + MIDI for URMP / MUSIC / AtinPiano)
+# The repo needs `torchpie` (git.dev.tencent.com, offline; not on PyPI, GitHub 404). We use a small stand-in with the
+# five helpers it calls: src/guitar2midi/baselines/foley_music_shim/torchpie (put on PYTHONPATH by the run scripts).
+# The repo was written for PyTorch 1.4; it runs here on torch 2.1.2 (RTX 4080 needs CUDA >= 11.8).
+# Install with PYTHONNOUSERSITE=1 so pip never takes packages from ~/.local.
+name: foleymusic
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - ffmpeg
+  - pip:
+      - --extra-index-url https://download.pytorch.org/whl/cu121
+      - torch==2.1.2
+      - torchvision==0.16.2
+      - av
+      - joblib
+      - numpy<2
+      - pandas
+      - pyhocon
+      - pretty_midi==0.2.9  # 0.2.10+ rejects Note(..., end=None), which Foley Music's event decoder creates
+      - tensorboard
+      - tqdm
+      - scipy
+      - matplotlib
+      - mir_eval
+      - decorator
+      - setuptools<81

@@ -961,3 +961,84 @@ the first sign). Fixed by installing every missing dependency into the env with 
 current versions pinned as constraints (`pip check` now only lists `chumpy`, which is intentionally missing);
 21/21 unit tests pass. The other envs (`amt`, `mmaudio`, `v2n`, `thinksound`, `foleycrafter`) only miss packages of
 our own package's requirements that they never import (they install it with `--no-deps`).
+
+## CP15 — Foley Music retrained on its own guitar data, run on all datasets (2026-11-26)
+
+**Why retrained.** Foley Music (Gan et al., ECCV 2020: body + hand keypoints → Graph-Transformer → MIDI) has no
+released checkpoint, only code (`~/external/Foley-Music`, commit `dcc2638`, left unmodified) and its training data
+(`data_pose_midi.tar`: OpenPose keypoints + MIDI of URMP, AtinPiano, MUSIC). We trained it with the authors' code and
+config on **their MUSIC acoustic-guitar data only** (never on ours), so it is still zero-shot on our three sets.
+
+**Making the 2020 code run** (env `foleymusic`: Python 3.10, torch 2.1.2, `envs/foleymusic.yml`; all fixes outside
+the repo, in `src/guitar2midi/baselines/foley_music_shim/`, put on `PYTHONPATH`):
+- `torchpie` (the authors' unpublished helper package) → small stand-in with the used API (config, experiment
+  folder, logging, meters, checkpoint saving).
+- torch ≥ 2.1 passes `is_causal` to `nn.Transformer`'s encoder/decoder; Foley Music's own encoder/decoder have the
+  torch-1.x signature → `foley_torch2_patch.py` restores torch 1.x's `nn.Transformer.forward` (same computation),
+  loaded via `sitecustomize.py`.
+- `pretty_midi` pinned to 0.2.9 (0.2.10+ rejects `Note(end=None)`, which the MIDI decoder creates); 0.2.9 still uses
+  `np.int` (removed in numpy 1.24) → alias `np.int = int` in the same patch (only hit when reading URMP/val MIDI;
+  the first violin run and the first val check crashed on it and were rerun).
+
+**Training** (their config, 100 epochs, batch 16, 6 s windows at 22 fps, Adam; ~1 min per epoch on the RTX 4080):
+- **MUSIC acoustic guitar** (`outputs/runs/2026-11-26_cp15_foleymusic_acoustic_guitar/`): best validation loss
+  **2.62 at epoch 8** (`model_best.pth.tar`, used below); after that the model overfits (training loss keeps
+  falling, val loss rises to 6.1 at epoch 100). The paper gives no automatic guitar metric (human study only).
+- **Reproduction check, URMP violin** (`…_urmp_violin/`): best validation NLL **1.545 (epoch 9)** vs **1.558 in the
+  paper** (Table 1) → our training reproduces the paper's number, so the code, shim and data are set up correctly.
+
+**Keypoints of our clips.** OpenPose (used by the authors) is not installed; we use MMPose whole-body (RTMPose-m +
+RTMDet-m, COCO-WholeBody 133 points) mapped to their 65-point layout (BODY_25 + 2 × 20 hand points)
+(`src/guitar2midi/baselines/foley_music_pose.py`). Calibrated on 4 of their own MUSIC guitar val videos
+(`scripts/33a_calibrate_foley_pose.py`, `outputs/runs/2026-11-26_cp15_pose_calibration/`): coordinates = x/W − 0.5,
+y/H − 0.5 (fitted scale 0.99–1.00 on the two clean videos; the other two have letterbox/crop differences), their
+frame i = video time (i − 2)/22 s, points below score 0.7 set to (0, 0, 0) as in their data. Our points lie within
+2–5 % (body) and 2–11 % (hands) of the neck–hip distance of theirs on the clean videos.
+Our clips (`scripts/33b_extract_clip_pose.py` → `<clips-dir>/pose_body65/`, same 74 / 32 / 23 clips as the strips):
+detected share body 32 / 7 / 26 %, hands 74–86 % (GAPS / GuiFiR / magcil; body low because legs and hips are out
+of frame in close shots). Check sheet `<clips-dir>/plots/pose_body65_sheet.jpg`.
+
+**Does the trained model use the pose?** (`scripts/33e_foley_val_nll.py`, `outputs/runs/2026-11-26_cp15_foleymusic_val_nll/`):
+teacher-forced NLL per MIDI event on their own guitar val windows, with their keypoints vs keypoints of another video:
+
+| model | windows | their keypoints | our keypoints | other video's keypoints | own < other |
+|---|---|---|---|---|---|
+| guitar, best (epoch 8) | 80 (4 videos with ours) | 2.629 | 2.635 | 2.635 | 40 %, p = 0.41 |
+| guitar, last (epoch 100) | 80 | 6.197 | 6.074 | 6.142 | 45 %, p = 0.25 |
+| guitar, best | all 353 (9 videos) | 2.657 | | 2.645 | 38 % (other video *better*, p = 8e-7) |
+| violin, best | all 110 (4 videos) | 1.543 | | 1.547 | 55 %, p = 0.68 |
+
+So the guitar model does **not** use the video even on its own data: it is a music language model that ignores
+the keypoints. Our keypoints vs theirs make no practical difference (2.635 vs 2.629). **The violin model, which
+reproduces the paper's NLL, ignores the keypoints just as much** (1.543 vs 1.547): the paper's NLL level is reached
+without using the video, so the reported NLL does not show that the pose is used (the paper has no
+mismatched-pose control; with our retraining of the released code and data we cannot confirm that it is).
+
+**Inference on our clips** (`src/guitar2midi/baselines/foley_music.py`, `scripts/33c_run_foley_music.py`): 6 s windows
+[0, 6) and [L − 6, L) (notes < 6 s from the first, the rest from the second), beam search 5, max 512 events, as in the
+authors' test script; ~20 s per clip. Scored with `30e` (masked, other-video control), runs
+`outputs/runs/2026-11-26_cp15_foleymusic_{gaps,guifir,magcil}/`:
+
+| dataset | note F1@50 | with other video | frame F1 | timing F1 | onset r | notes/clip | chance F1@50 |
+|---|---|---|---|---|---|---|---|
+| GAPS (real MIDI, 74) | 2.2 | 2.5 (p = 0.64) | 8.4 | 27.0 | 0.00 | 24 (ref 32) | 2.1 |
+| GuiFiR-Vid (pseudo-GT, 32) | 3.1 | 2.2 (p = 0.23) | 5.3 | 33.4 | 0.01 | 34 (ref 32) | 1.6 |
+| magcil (pseudo-GT, 23) | 0.8 | 0.8 (p = 0.72) | 2.5 | 36.4 | −0.01 | 27 (ref 51) | 4.3 |
+
+GuiFiR tab recall **5.3 %** (with another clip's video 5.0 %; chance 3.0 %, reference 69.9 %).
+
+**Reading.**
+- At chance on every set, never better with the clip's own video than with another clip's (no metric, no set).
+- The output is nearly one note repeated: median 2 distinct pitches per clip, 28 / 74 GAPS clips a single pitch;
+  E4 (64) is 79 % of all GAPS notes, C#4/D4 (61/62) 91 % of the GuiFiR notes. The slightly higher GuiFiR note F1 and
+  tab recall come from this fixed pitch habit (C#/D are common in the pop keys there; same with another video), not
+  from the video.
+- Same as the val-loss check: the model learned the pitch/rhythm statistics of the MUSIC guitar MIDI, not a
+  keypoint → note mapping. Since the violin model (paper-level NLL) does the same, this is not only our guitar data
+  (small: 244 batches of 16 windows per epoch, 9 val videos; audio-transcribed MIDI) or our keypoints: with the
+  released code, data and config, the decoder learns the MIDI statistics and the pose encoder is not used.
+  Caveat: we could not run the authors' own weights (none released), so this is our retraining.
+- Third video → MIDI baseline, third failure mode: V2N silence, Audeo constant wrong keys, Foley Music a fixed
+  pitch pattern independent of the video.
+
+Results table (`30i`): "Foley Music (retrained)" row in every block (merged from the cp15 runs).

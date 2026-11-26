@@ -1,10 +1,11 @@
-"""Baseline results table for all datasets (CP11, extended with the CP13 V2A rows; env guitar2midi).
+"""Baseline results table for all datasets (CP11, extended with the CP13-CP15 rows; env guitar2midi).
 
     python scripts/30i_results_table.py
 
 Reads the 30e runs of each dataset (masked to the clips/frames with strips) and merges their systems:
     outputs/runs/2026-11-26_cp13_v2a_{gaps,guifir,magcil}/per_clip.csv     (V2A, V2N, controls)
     outputs/runs/2026-11-26_cp14_audeo_{gaps,guifir,magcil}/per_clip.csv   (Audeo, CP14; 32b_run_audeo.py)
+    outputs/runs/2026-11-26_cp15_foleymusic_{gaps,guifir,magcil}/per_clip.csv   (Foley Music, CP15; 33c_run_foley_music.py)
 created with (outputs/logs/cp13_evaluate.sh)
     python scripts/30e_evaluate_baselines.py --clips <clips-dir> --run-name cp13_v2a_<ds> --mask-dir <clips-dir>/strips \\
         --systems real_audio mmaudio_noprompt mmaudio_prompt thinksound_noprompt thinksound_prompt \\
@@ -16,7 +17,7 @@ and adds for GuiFiR-Vid the tab recall (share of the manual tab pitches found as
 
 Rows per dataset: real audio (GAPS: ceiling; pseudo-GT sets: the reference itself, 100 by construction, so only
 its tab recall is shown), MMAudio / ThinkSound / FoleyCrafter without / with prompt, V2N and Audeo zero-shot
-(video -> MIDI on the fretboard strips), chance
+(video -> MIDI on the fretboard strips), Foley Music retrained on its MUSIC guitar data (body + hand keypoints -> MIDI), chance
 (real-audio transcription of another piece) and silence.
 Significance: for every system that has a ``<system>@shuffled`` run (the same model given another piece's video),
 paired Wilcoxon over clips, matched vs mismatched video; * = p < 0.05 and matched better. All matched/mismatched
@@ -38,9 +39,12 @@ from scipy.stats import wilcoxon
 from guitar2midi.baselines import clips_guifir as G
 
 DATASETS = [  # name in table, 30e runs (merged), clips dir, label source
-    ("GAPS", ("2026-11-26_cp13_v2a_gaps", "2026-11-26_cp14_audeo_gaps"), Path("data/interim/baseline_clips"), "real MIDI"),
-    ("GuiFiR-Vid", ("2026-11-26_cp13_v2a_guifir", "2026-11-26_cp14_audeo_guifir"), Path("data/interim/baseline_clips_guifir"), "pseudo-GT"),
-    ("magcil", ("2026-11-26_cp13_v2a_magcil", "2026-11-26_cp14_audeo_magcil"), Path("data/interim/baseline_clips_magcil"), "pseudo-GT"),
+    ("GAPS", ("2026-11-26_cp13_v2a_gaps", "2026-11-26_cp14_audeo_gaps",
+              "2026-11-26_cp15_foleymusic_gaps"), Path("data/interim/baseline_clips"), "real MIDI"),
+    ("GuiFiR-Vid", ("2026-11-26_cp13_v2a_guifir", "2026-11-26_cp14_audeo_guifir",
+              "2026-11-26_cp15_foleymusic_guifir"), Path("data/interim/baseline_clips_guifir"), "pseudo-GT"),
+    ("magcil", ("2026-11-26_cp13_v2a_magcil", "2026-11-26_cp14_audeo_magcil",
+              "2026-11-26_cp15_foleymusic_magcil"), Path("data/interim/baseline_clips_magcil"), "pseudo-GT"),
 ]
 ROWS = [  # system in per_clip.csv, label
     ("real_audio", "Real audio"),
@@ -52,6 +56,7 @@ ROWS = [  # system in per_clip.csv, label
     ("foleycrafter_prompt", "FoleyCrafter (+ prompt)"),
     ("v2n_zeroshot", "V2N zero-shot"),
     ("audeo_zeroshot", "Audeo zero-shot"),
+    ("foleymusic", "Foley Music (retrained)"),
     ("real_audio@shuffled", "Chance (other piece)"),
     ("silence", "Silence"),
 ]
@@ -182,7 +187,8 @@ def main() -> None:
             r"pitches found as onsets ($\pm$100\,ms). GAPS is scored against real MIDI, GuiFiR-Vid and magcil against "
             r"the transcription of the real audio (pseudo-GT; its own row is omitted there). Real audio on GAPS = "
             r"transcription ceiling. MMAudio, ThinkSound, FoleyCrafter: video $\to$ audio, scored via audio "
-            r"transcription; V2N, Audeo: piano video $\to$ MIDI models on the rectified fretboard strip. "
+            r"transcription; V2N, Audeo: piano video $\to$ MIDI models on the rectified fretboard strip; "
+            r"Foley Music: body and hand keypoints $\to$ MIDI, retrained by us on its own MUSIC guitar data. "
             r"Chance = real-audio transcription of another piece. $^{*}$ The model is better with the clip's own "
             r"video than with the video of another piece (paired Wilcoxon, $p<0.05$; not tested for MMAudio + "
             r"prompt).}",

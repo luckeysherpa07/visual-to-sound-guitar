@@ -2,8 +2,9 @@
 
     python scripts/30i_results_table.py
 
-Reads one 30e run per dataset (all systems, masked to the clips/frames with strips):
-    outputs/runs/2026-11-26_cp13_v2a_{gaps,guifir,magcil}/per_clip.csv
+Reads the 30e runs of each dataset (masked to the clips/frames with strips) and merges their systems:
+    outputs/runs/2026-11-26_cp13_v2a_{gaps,guifir,magcil}/per_clip.csv     (V2A, V2N, controls)
+    outputs/runs/2026-11-26_cp14_audeo_{gaps,guifir,magcil}/per_clip.csv   (Audeo, CP14; 32b_run_audeo.py)
 created with (outputs/logs/cp13_evaluate.sh)
     python scripts/30e_evaluate_baselines.py --clips <clips-dir> --run-name cp13_v2a_<ds> --mask-dir <clips-dir>/strips \\
         --systems real_audio mmaudio_noprompt mmaudio_prompt thinksound_noprompt thinksound_prompt \\
@@ -14,7 +15,8 @@ and adds for GuiFiR-Vid the tab recall (share of the manual tab pitches found as
 ``clips_guifir.tab_recall``, reading high E first + capo), with the same shuffled pairing as 30e.
 
 Rows per dataset: real audio (GAPS: ceiling; pseudo-GT sets: the reference itself, 100 by construction, so only
-its tab recall is shown), MMAudio / ThinkSound / FoleyCrafter without / with prompt, V2N zero-shot, chance
+its tab recall is shown), MMAudio / ThinkSound / FoleyCrafter without / with prompt, V2N and Audeo zero-shot
+(video -> MIDI on the fretboard strips), chance
 (real-audio transcription of another piece) and silence.
 Significance: for every system that has a ``<system>@shuffled`` run (the same model given another piece's video),
 paired Wilcoxon over clips, matched vs mismatched video; * = p < 0.05 and matched better. All matched/mismatched
@@ -35,10 +37,10 @@ from scipy.stats import wilcoxon
 
 from guitar2midi.baselines import clips_guifir as G
 
-DATASETS = [  # name in table, run, clips dir, label source
-    ("GAPS", "2026-11-26_cp13_v2a_gaps", Path("data/interim/baseline_clips"), "real MIDI"),
-    ("GuiFiR-Vid", "2026-11-26_cp13_v2a_guifir", Path("data/interim/baseline_clips_guifir"), "pseudo-GT"),
-    ("magcil", "2026-11-26_cp13_v2a_magcil", Path("data/interim/baseline_clips_magcil"), "pseudo-GT"),
+DATASETS = [  # name in table, 30e runs (merged), clips dir, label source
+    ("GAPS", ("2026-11-26_cp13_v2a_gaps", "2026-11-26_cp14_audeo_gaps"), Path("data/interim/baseline_clips"), "real MIDI"),
+    ("GuiFiR-Vid", ("2026-11-26_cp13_v2a_guifir", "2026-11-26_cp14_audeo_guifir"), Path("data/interim/baseline_clips_guifir"), "pseudo-GT"),
+    ("magcil", ("2026-11-26_cp13_v2a_magcil", "2026-11-26_cp14_audeo_magcil"), Path("data/interim/baseline_clips_magcil"), "pseudo-GT"),
 ]
 ROWS = [  # system in per_clip.csv, label
     ("real_audio", "Real audio"),
@@ -49,6 +51,7 @@ ROWS = [  # system in per_clip.csv, label
     ("foleycrafter_noprompt", "FoleyCrafter (video)"),
     ("foleycrafter_prompt", "FoleyCrafter (+ prompt)"),
     ("v2n_zeroshot", "V2N zero-shot"),
+    ("audeo_zeroshot", "Audeo zero-shot"),
     ("real_audio@shuffled", "Chance (other piece)"),
     ("silence", "Silence"),
 ]
@@ -92,12 +95,18 @@ def main() -> None:
     args = p.parse_args()
 
     table, tests = [], []
-    for name, run, clips_dir, source in DATASETS:
-        with open(args.runs / run / "per_clip.csv") as f:
-            rows = list(csv.DictReader(f))
+    for name, runs, clips_dir, source in DATASETS:
         by = {}
-        for r in rows:
-            by.setdefault(r["system"], {})[r["clip_id"]] = r
+        for run in runs:  # systems in several runs (real_audio, silence, ...) are identical; the first one is kept
+            with open(args.runs / run / "per_clip.csv") as f:
+                rows = list(csv.DictReader(f))
+            new = {}
+            for r in rows:
+                new.setdefault(r["system"], {})[r["clip_id"]] = r
+            if by and set(new["real_audio"]) != set(by["real_audio"]):
+                raise ValueError(f"{run}: other clips than {runs[0]}")
+            for system, clips in new.items():
+                by.setdefault(system, clips)
         clip_ids = list(by["real_audio"])
         groups = [by["real_audio"][c]["group"] for c in clip_ids]
         tab = tab_column(clips_dir, clip_ids, groups) if (clips_dir / "tab").is_dir() else {}
@@ -172,7 +181,8 @@ def main() -> None:
             r"similarity; onset $r$ = correlation of onset curves; tab rec.\ = share of GuiFiR's manual tablature "
             r"pitches found as onsets ($\pm$100\,ms). GAPS is scored against real MIDI, GuiFiR-Vid and magcil against "
             r"the transcription of the real audio (pseudo-GT; its own row is omitted there). Real audio on GAPS = "
-            r"transcription ceiling. "
+            r"transcription ceiling. MMAudio, ThinkSound, FoleyCrafter: video $\to$ audio, scored via audio "
+            r"transcription; V2N, Audeo: piano video $\to$ MIDI models on the rectified fretboard strip. "
             r"Chance = real-audio transcription of another piece. $^{*}$ The model is better with the clip's own "
             r"video than with the video of another piece (paired Wilcoxon, $p<0.05$; not tested for MMAudio + "
             r"prompt).}",

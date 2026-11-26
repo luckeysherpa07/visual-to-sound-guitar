@@ -895,3 +895,69 @@ another piece's video, paired Wilcoxon p < 0.05; all matched/mismatched means in
 `thesis/tables/baseline_results.tex`, `outputs/runs/2026-11-26_results_table/`. Stars: MMAudio GAPS (note, timing,
 onset r); ThinkSound GAPS (note, timing, onset r), GuiFiR (timing, onset r), magcil (note F1 only: 5.9 vs 1.9 with
 another video, but chance = 4.3); FoleyCrafter none. CP14–CP17 rows follow in CP18.
+
+---
+
+## CP14 — Audeo zero-shot on all datasets (2026-11-26)
+
+**Weights.** The Drive folder in Audeo's README is gone (404). Issue #4 of `shlizee/Audeo` (April 2025, user
+`DragonLiu1995`, likely co-author Xiulong Liu) links `Audeo_dataset.zip` (1.1 GB, Drive id
+`1EW8Dj4LRB2aAKgFaPagqXfBCOC5U7Q19`) with `Video2Roll_models/Video2RollNet.pth` and
+`Roll2Midi_models/Roll2Midi_model/checkpoint-11.tar` (+ their test data). Extracted to
+`~/external/Audeo_weights/Audeo_dataset/`; code `~/external/Audeo` (commit `031dbd7`). Both checkpoints load with
+`torch.load(weights_only=True)`. Runs in env `guitar2midi` (needs only torch, numpy, PIL).
+
+**Wrapper** `src/guitar2midi/baselines/audeo.py` (Audeo's network classes, our own inference loop):
+stage 1 Video2RollNet (5 grayscale frames resized to 900×100 → 51 keys, MIDI 36–86, roll = sigmoid ≥ 0.4),
+stage 2 Roll2MidiNet (U-Net generator on 100-frame pieces, ≥ 0.5); notes = runs of active frames (Audeo's
+`Midi_synth`), 25 fps. Deviation: short/odd chunks padded with probability 0 (Audeo pads with logit 0 = 0.5 and
+drops a trailing odd chunk).
+
+**Positive control** (`scripts/32a_check_audeo.py`):
+- Stage 1 on the 5 example frames Audeo ships (frames 248–252 of WTC B2 No. 1) vs Audeo's own saved logits: max
+  difference **0.05** (mean 0.015), same on/off decisions. Needed one fix: Audeo resized with Pillow's *old* default
+  filter (nearest; Pillow ≥ 7 uses bicubic). With bicubic the logits differ by up to 1.5.
+- Stage 2 on Audeo's saved stage-1 logits of its 3 test pieces, frame F1 vs Audeo's pseudo-GT: roll 0.64 / 0.61 /
+  0.55 → Roll2Midi **0.68 / 0.67 / 0.58** (Roll2Midi improves the roll, as in the paper).
+
+**Run** (`scripts/32b_run_audeo.py`) on the same strips as V2N (nut left = low notes left, like the keyboard),
+plus two variants: vertical flip (fingers enter from below, as on the piano) and full-string strips (CP12).
+Two systems each: `audeo_zeroshot` (full Audeo) and `audeo_roll` (stage 1 only). ~0.3 s per clip.
+Evaluation runs `outputs/runs/2026-11-26_cp14_audeo_{gaps,guifir,magcil}/` (masked, other-video control).
+
+| dataset | system | note F1@50 | frame F1 | timing F1 | timing F1, other video | onset r | notes/clip |
+|---|---|---|---|---|---|---|---|
+| GAPS (real MIDI, 74) | Audeo | 0.3 | 5.4 | 18.9 | 20.9 | −0.04 | 26 (ref 32) |
+| | Audeo stage 1 only | 0.7 | 5.6 | 27.4 | 27.6 | −0.04 | 52 |
+| | Audeo, flipped / full string | 0.3 / 0.6 | 5.6 / 5.1 | 16.3 / 19.4 | | | 23 / 25 |
+| | chance; MMAudio; V2N | 2.1; 3.1; 0.0 | 9.8; 10.3; 0 | 28.1; 35.5; 0 | | | |
+| GuiFiR-Vid (pseudo-GT, 32) | Audeo | 0.3 | 7.1 | 12.8 | 12.0 | −0.01 | 16 (ref 32) |
+| | Audeo stage 1 only | 0.6 | 7.4 | 14.9 | 15.8 | −0.01 | 23 |
+| | chance | 1.6 | 9.4 | 29.3 | | | |
+| magcil (pseudo-GT, 23) | Audeo | 0.6 | 2.4 | 29.0 | 31.0 | −0.06 | 30 (ref 51) |
+| | Audeo stage 1 only | 2.1 | 2.4 | 47.4 | 44.1 | 0.00 | 66 |
+| | chance | 4.3 | 5.2 | 52.1 | | | |
+
+GuiFiR tab recall: Audeo **1.0 %**, stage 1 only 1.1 % (chance 3.0 %, reference 69.9 %).
+Own video vs another clip's video: never better on any metric and dataset (all p > 0.05; magcil note F1 even
+*lower* with the own video, p = 0.04).
+
+**Reading.**
+- Unlike V2N (silence), Audeo outputs confident notes (max key probability median 0.98 per clip), but they are
+  **wrong and unrelated to the video**: below chance on note F1 on all three sets, same as with another clip's video.
+- The plots (`data/interim/<clips-dir>/plots/audeo/`) show why: a fixed set of keys is switched on for most of the
+  clip (horizontal lines), i.e. Audeo reacts to static image columns (frets / strings that look like pressed keys),
+  not to the playing. Flipping the strip or using the full-string strip does not change this.
+- So the two piano video → MIDI models fail in two different ways (V2N: nothing; Audeo: constant wrong notes);
+  neither transfers to guitar without training. Together with CP13: no existing model, video → audio or
+  video → MIDI, gets guitar notes from video.
+
+The results table (`30i`) now merges the CP13 and CP14 runs and has an "Audeo zero-shot" row in every block.
+
+**Environment fix (found during CP14).** The `guitar2midi` env had never owned several of its dependencies
+(`typing_extensions`, `filelock`, `fsspec`, `requests`, `tqdm`, `pytest`, …): pip had taken them from `~/.local`
+at env creation. The `foleycrafter` install removed them there, so torch no longer imported (`decorator` in CP13 was
+the first sign). Fixed by installing every missing dependency into the env with `PYTHONNOUSERSITE=1` and the
+current versions pinned as constraints (`pip check` now only lists `chumpy`, which is intentionally missing);
+21/21 unit tests pass. The other envs (`amt`, `mmaudio`, `v2n`, `thinksound`, `foleycrafter`) only miss packages of
+our own package's requirements that they never import (they install it with `--no-deps`).

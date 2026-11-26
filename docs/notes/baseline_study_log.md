@@ -13,6 +13,10 @@ video → audio baselines, CP14 video → MIDI baselines, CP15 LoRA fine-tune of
 (was CP13; full fine-tune only, no LoRA), CP17 results table + summary. Old optional CP14 absorbed into CP13/CP14.
 Meeting notes: [2026-11-25_supervisor_meeting.md](2026-11-25_supervisor_meeting.md).
 
+**Renumbering (2026-11-26).** The video → MIDI baselines are split: CP14 Audeo zero-shot, CP15 Foley Music
+(retrained on its own data). Then CP16 LoRA fine-tune of MMAudio (was CP15), CP17 V2N trained (was CP16), CP18
+results table + summary (was CP17). Sections written before keep the numbers of their day.
+
 Note: `data/` and `outputs/` are not in git. Paths below are local; rerun the command to regenerate them.
 
 ---
@@ -876,10 +880,10 @@ GuiFiR tab recall (onset, high-E first + capo; reference 69.9 %, chance 3.0 %, M
   one averaged CLIP vector (no time), timing only through a coarse on/off mask; Auffusion at 16 kHz.
 - So for the thesis: three V2A model families (flow matching MMAudio, MLLM-guided ThinkSound, adapter-on-T2A
   FoleyCrafter) all fail at the notes; the best one gets some rhythm from the video. This is the motivation for a
-  visual model that reads the fretboard (CP16 onwards).
+  visual model that reads the fretboard (V2N trained, CP17 onwards).
 
 Examples: `data/interim/<clips-dir>/examples/*__spectrograms.png` (all systems stacked, reference notes white);
 listening files `examples/<clip>__thinksound_*.mp4`, `__foleycrafter_*.mp4` where a real example existed.
 
 **Not done in CP13:** PrismAudio (backup, not needed: ThinkSound already covers the MLLM-guided family);
-HunyuanVideo-Foley (EU licence). The CP11 results table (`30i`) gets the new rows in CP17.
+HunyuanVideo-Foley (EU licence). The CP11 results table (`30i`) gets the new rows in CP18.

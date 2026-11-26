@@ -9,6 +9,9 @@ To be reviewed before CP13 starts.
 baselines) and CP15 (LoRA fine-tune of MMAudio). "CP13" below means CP16; run folders will be `<date>_cp16_v2n_<X>`.
 No LoRA on V2N (full fine-tune only). The GAPS train split is already downloaded (267/270 videos, 14.7 h).
 
+**Renumbered again 2026-11-26: now CP17** (V2M baselines split into CP14 Audeo and CP15 Foley Music, LoRA = CP16).
+"CP13" below means CP17; run folders will be `<date>_cp17_v2n_<X>`.
+
 
 ## Context
 

@@ -15,6 +15,8 @@ zero-shot = silence on GAPS / GuiFiR-Vid / magcil).
 - New checkpoint order: CP13 more V2A baselines → CP14 V2M baselines → CP15 LoRA fine-tune of a V2A model →
   CP16 V2N trained on guitar → CP17 results table + summary. The old CP13 (V2N pilot) becomes CP16, the old
   optional CP14 is absorbed into CP13/CP14.
+  **Renumbered 2026-11-26:** V2M split into CP14 Audeo + CP15 Foley Music; LoRA → CP16, V2N trained → CP17,
+  table → CP18. The numbers below are those of the meeting day.
 - **Baselines: check first, then pick.** A short availability check (public code, released weights, licence, fits
   the RTX 4080 16 GB, effort) for HunyuanVideo-Foley, ThinkSound, Foley Music, Audeo and 1–2 others; then run
   about 2 V2A and 1–2 V2M models on all three datasets with the existing pipeline.

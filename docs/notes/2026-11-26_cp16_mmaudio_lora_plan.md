@@ -70,7 +70,7 @@ as fallback.
   audio is near silent and the 4 videos shorter than their audio past the video end.
 - **Audio = the video's own audio track** (the mp4 downloaded from YouTube), not the GAPS wav. This is exactly
   MMAudio's own training recipe (its VGGSound loader reads frames and audio from the same mp4; mono, resampled to
-  44.1 kHz, peak-normalised), and video and audio are then in sync by construction: no lag measurement or shift
+  44.1 kHz; no loudness normalisation, the loader's default), and video and audio are then in sync by construction: no lag measurement or shift
   needed. (The GAPS wav is the same recording but lags the video by 0–49 ms of codec priming; 49 ms is ~1
   Synchformer frame, so using it unshifted would teach a timing offset.) The 4 videos shorter than their GAPS audio
   are no problem this way: windows only cover the video.

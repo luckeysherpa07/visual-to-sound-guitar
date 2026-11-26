@@ -15,3 +15,4 @@ dependencies:
       - torchaudio
       - mmaudio @ git+https://github.com/hkchengrex/MMAudio.git@974010a026c731054592d8f777218bd9d85a6c24
       - soundfile
+      - pretty_midi       # CP16: guitar2midi.baselines.clips (cut_video) is imported for the LoRA windows

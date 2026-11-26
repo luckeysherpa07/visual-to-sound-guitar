@@ -1042,3 +1042,52 @@ GuiFiR tab recall **5.3 %** (with another clip's video 5.0 %; chance 3.0 %, refe
   pitch pattern independent of the video.
 
 Results table (`30i`): "Foley Music (retrained)" row in every block (merged from the cp15 runs).
+
+## CP16 step 16a — LoRA training windows, split and MMAudio features (2026-11-26)
+
+Plan: `docs/notes/2026-11-26_cp16_mmaudio_lora_plan.md`. Scripts `34a_make_lora_windows.py` (env guitar2midi),
+`34b_extract_lora_features.py` and `34c_check_lora_features.py` (env mmaudio; `34c --plot` in guitar2midi), module
+`guitar2midi.baselines.mmaudio_lora`. Output in `data/processed/mmaudio_lora/` (gitignored).
+
+**Windows and split (`34a`).** GAPS **train** split only, the 267 pieces with a video (14.71 h). 8 s windows every
+8 s inside the video. Windows with < 3 GAPS notes are dropped (intros, talking, applause): 270 windows.
+Validation = whole performers drawn at random (seed 0; only performers with ≤ 3 pieces, so one prolific player
+cannot fill it) until ≥ 10 % of the pieces.
+
+| part | pieces | performers | windows kept | hours | notes / window (median) |
+|---|---|---|---|---|---|
+| train | 239 | 163 | 5,630 | 12.51 | 38 |
+| val | 28 | 20 | 586 | 1.30 | 31 |
+
+No performer in both parts. Largest performers in train: Edson Lopes 421 windows, John Williams 133, Ana Vidovic 124.
+
+**Leakage check.** GAPS splits are by piece, not by performer: **12 of the 27 test performers also play in GAPS
+train, covering 15 of the 30 test pieces** (incl. Edson Lopes, the largest train performer). Decision: keep the
+test set and the training data unchanged (as planned), report it, and in 16d report GAPS test separately for seen
+and unseen performers (does LoRA learn the player's sound/room rather than the notes?).
+
+**Features (`34b`).** Per window, MMAudio's own conditioning features and audio target, computed exactly as at
+generation (CP4/CP9) and as in MMAudio's training data: CLIP (64, 1024), Synchformer (192, 768), VAE latent
+mean/std (345, 40) of the mp4's own audio track (mono, 44.1 kHz, 353,280 samples; no loudness normalisation), plus
+the text features of "solo classical guitar" once. 6,216 windows (all kept ones, none skipped), 267 videos,
+162 min, 3.2 GB (clip/sync fp16), no non-finite values. Window loudness (rms) median −21.9 dB, 1–99 % −37.5 to
+−13.1 dB.
+
+Decisions and why:
+- **Audio = the mp4's own track**, not the GAPS wav: MMAudio's recipe, and in sync with the frames by construction
+  (the GAPS wav lags the video by 0–49 ms ≈ 1 Synchformer frame; unshifted it would teach a timing offset).
+- **Frames: every window is cut like the eval clips** (`clips.cut_video`, ffmpeg `fps=25`, x264 CRF 18) and read
+  with MMAudio's `load_video`. A first version read the frames in one pass with our own reader: CLIP features
+  matched (cosine 0.998) but Synchformer only 0.83–0.90, because frame picking differs by ~1 frame (float rounding
+  in MMAudio's frame selection, ffmpeg cut timing) and Synchformer is sensitive to that. With the eval-identical
+  path: cosine 1.000 for both (checked on 001_mvswc against a fresh eval-style clip).
+- **Cuts are 8.2 s**: an 8.0 s cut gives `load_video` 199 of the 200 Synchformer frames it needs for 8 s.
+  Side finding: the CP4/CP9 eval clips (8.0 s) therefore ran with 63 CLIP / 199 sync frames, i.e. MMAudio
+  generated 7.96 s. Harmless for those results (masked evaluation on the generated length), noted for 16d.
+- **Precision:** CLIP and Synchformer in bf16 as at generation; VAE encoder in fp32 (its STFT does not run in bf16).
+
+**Check (`34c`, `outputs/runs/2026-11-26_cp16_features_check/check_sheet.png`).** The stored latent mean decoded
+back to sound (VAE decoder + BigVGAN vocoder) vs the real audio of 4 windows (train loud / median / quiet, val
+median): spectrograms nearly identical, GAPS notes on the harmonics, loudness-envelope correlation 0.91 / 0.92 /
+0.86 / 0.94 (quiet window lowest: noise floor). So the training target is the real guitar audio of that window,
+in sync with the video features.

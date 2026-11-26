@@ -1,0 +1,18 @@
+# ThinkSound env for the baseline study (CP13): video + text (caption / chain-of-thought) -> audio
+# (Liu et al., NeurIPS 2025). Separate env: pins torch 2.6.0 and ~240 packages.
+#   git clone https://github.com/FunAudioLLM/ThinkSound ~/external/ThinkSound   # commit 4e2cfd5 (master)
+#   conda env create -f envs/thinksound.yml && conda activate thinksound
+#   pip install -r ~/external/ThinkSound/requirements.txt  (without flash-attn, optional and slow to build;
+#     av==14.4.0 has no wheel for py3.10, use av==14.2.0)
+#   pip install -e ~/external/ThinkSound --no-deps && pip install -e . --no-deps
+#   git lfs install && git clone https://huggingface.co/liuhuadai/ThinkSound ~/external/ThinkSound/ckpts
+# Licence: Apache-2.0, research/education only (no commercial use); VAE under the Stability AI Community License.
+name: thinksound
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - ffmpeg<7
+  - git-lfs
+  - setuptools<81   # pkg_resources (needed by a ThinkSound dependency)

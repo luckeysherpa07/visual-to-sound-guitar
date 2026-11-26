@@ -1,0 +1,46 @@
+# FoleyCrafter env for the baseline study (CP13): video (+ optional text prompt) -> audio
+# (Zhang et al., IJCV 2026; Auffusion text-to-audio + semantic/temporal video adapters, 16 kHz, <= 10 s).
+#   git clone https://github.com/open-mmlab/FoleyCrafter ~/external/FoleyCrafter   # commit b4526d1
+#   conda env create -f envs/foleycrafter.yml && conda activate foleycrafter && pip install -e . --no-deps
+# Weights (downloaded by scripts/30c_run_foleycrafter.py on first use, into ~/external/FoleyCrafter/checkpoints):
+#   HF ymzhang319/FoleyCrafter (adapters, vocoder, timestamp detector) + auffusion/auffusion-full-no-adapter
+#   + h94/IP-Adapter image encoder (HF cache). Licence: Apache-2.0 (Auffusion: check before commercial use).
+# Versions follow the repo's requirements/environment.yaml (torch 2.2.0, diffusers 0.25.1, transformers 4.30.2).
+name: foleycrafter
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - ffmpeg
+  - pip:
+      - --extra-index-url https://download.pytorch.org/whl/cu118
+      - torch==2.2.0
+      - torchvision==0.17.0
+      - torchaudio==2.2.0
+      - xformers==0.0.24
+      - diffusers==0.25.1
+      - transformers==4.30.2
+      - huggingface_hub==0.20.3
+      - accelerate==0.27.2
+      - numpy<2
+      - imageio==2.33.1
+      - decord==0.6.0
+      - einops
+      - omegaconf
+      - safetensors
+      - tqdm==4.66.1
+      - soundfile==0.12.1
+      - moviepy==1.0.3
+      - kornia==0.7.1
+      - h5py==3.7.0
+      - pandas
+      - pretty_midi
+      - matplotlib
+      - opencv-python-headless
+      - requests
+      - fsspec
+      - typing_extensions
+      - pydub
+      - librosa
+      - scipy

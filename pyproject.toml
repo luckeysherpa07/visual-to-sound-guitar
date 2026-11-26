@@ -13,6 +13,7 @@ dependencies = [
     "torch",
     "pretty_midi",
     "mir_eval",
+    "decorator",  # mir_eval needs it; pip skips it if ~/.local has a copy, which other envs can remove
     "pyyaml",
 ]
 

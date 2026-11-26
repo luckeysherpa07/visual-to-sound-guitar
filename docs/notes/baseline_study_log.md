@@ -790,3 +790,96 @@ annotation. Expect the picking-hand benefit mainly on wide shots; on close-ups (
 **Code.** `fretboard_grid.BRIDGE_X`, `extend_corners` (+ unit test); 30f and 31a save `<clip>_corners.npy` (31a
 reuses existing clip files unless `--recut`); new `scripts/30j_make_full_strips.py`; 30g_run_v2n and 30g_strip_stats
 skip `*_corners.npy` when listing clips.
+
+---
+
+## CP13 step 1 — Availability check of more V2A / V2M models (2026-11-25)
+
+Checked from the repos, model cards, licences and papers (no installs yet). GPU: RTX 4080 16 GB. We work in
+Würzburg (EU), which matters for one licence.
+
+| Model | Type | Code | Weights | Licence | VRAM (stated) | Fit for us |
+|---|---|---|---|---|---|---|
+| MMAudio (done, CP4/CP9) | V2A | MIT | HF, CC-BY-NC 4.0 | research ok | ~6 GB fp16 | done |
+| **ThinkSound** (NeurIPS 2025) | V2A (video + caption/CoT text) | yes (`predict.py`) | HF `liuhuadai/ThinkSound` (~1.3 B params) | Apache-2.0 + "research/education only, no commercial use"; VAE: Stability AI Community | not stated; half-precision option | **yes**: CoT is a text string computed upstream (`extract_latents`), so a fixed caption should work (verify at install); 44.1 kHz, duration set per run |
+| **FoleyCrafter** (IJCV 2026) | V2A (Auffusion + semantic/temporal adapters) | yes | HF `ymzhang319/FoleyCrafter` + Auffusion base | Apache-2.0 (check Auffusion for commercial) | not stated (Auffusion-size, should fit) | **yes**, different design (text-to-audio model + video adapters) |
+| PrismAudio (ThinkSound successor) | V2A | yes (branch) | HF `FunAudioLLM/PrismAudio`, 518 M | as ThinkSound | not stated | backup (needs a structured CoT string) |
+| HunyuanVideo-Foley | V2A | yes | HF, XXL 20 GB / XL 16 GB (8–12 GB with offload) | **Tencent Hunyuan Community Licence: "does not apply in the European Union, UK and South Korea"; use outside the territory is unlicensed**; outputs may not be used to improve other AI models | XL fits with offload | **blocked by licence in the EU** unless the supervisor / university says otherwise |
+| Kling-Foley | V2A | benchmark only | no public weights found | — | — | no |
+| **Audeo** (NeurIPS 2020) | V2M (piano: Video2Roll → Roll2Midi) | yes | Google Drive (`Video2RollNet.pth`, Roll2Midi) — link not verifiable from the fetch tool, test with gdown | no LICENSE file | small CNN | **yes, as a second piano zero-shot** (like V2N, on our strips; expect silence) |
+| **Foley Music** (ECCV 2020) | V2M (body/hand pose → MIDI, Graph-Transformer) | yes (1 commit, PyTorch 1.4) | **no released checkpoint** (issue "Checkpoint" open since 2022); pose + MIDI training data released (`data_pose_midi.tar`) | no LICENSE file | small | only by **retraining** it on its released MUSIC data, which has an `acoustic_guitar` config; pose extractor not named (likely OpenPose) |
+| Multi-Instrumentalist Net (2020) | video → audio/MIDI | no code found | — | — | — | related work only |
+| TapToTab (2024) | guitar tabs from video **+ audio** | no code found | — | — | — | related work only (uses audio) |
+
+**No public guitar video → MIDI model with weights exists** (confirms the earlier statement).
+
+**Decided (Luckey, 2026-11-25):** CP13 = ThinkSound + FoleyCrafter (PrismAudio as backup);
+HunyuanVideo-Foley only if the EU licence question is cleared. CP14 = Audeo zero-shot (cheap) + Foley Music
+retrained on its released acoustic-guitar data (only if it installs and trains in ~1–2 days; otherwise related work).
+HunyuanVideo-Foley not used (EU licence exclusion).
+
+---
+
+## CP13 step 2 — ThinkSound and FoleyCrafter on all datasets (2026-11-25/26)
+
+**What ran.** Both models in their own envs (`envs/thinksound.yml`, `envs/foleycrafter.yml`), repos unmodified
+(ThinkSound `4e2cfd5`, FoleyCrafter `b4526d1`), seed 42, called through `baselines/v2a_thinksound.py` /
+`v2a_foleycrafter.py` by `scripts/30k_run_thinksound.py` / `30l_run_foleycrafter.py`. Same clips, prompts and
+pipeline as MMAudio in CP9: generate (no prompt / "solo classical|acoustic|electric guitar") → `30d` (GAPS model,
+env `amt`) → `30e` masked to the strip frames (GAPS 74, GuiFiR 32, magcil 23 clips) with the other-video control →
+GuiFiR tab recall (`31a_check_guifir_tab`). Runs `outputs/runs/2026-11-26_cp13_v2a_{gaps,guifir,magcil}/`.
+
+- ThinkSound: `thinksound_light.ckpt`, fp16 feature extraction, 24 steps, CFG 5. The chain-of-thought text is a fixed
+  sentence (`v2a_thinksound.cot_text`), no LLM. Output 44.1 kHz, `int(duration)` s (magcil bend clips 3.2–3.4 s → 3 s,
+  the rest counts as silence). Fast: ~2 s per clip (GAPS 90 clips in 3 min).
+- FoleyCrafter: Auffusion + semantic adapter (one averaged CLIP image vector) + temporal adapter (onset detector on
+  150 frames → binary mask, ControlNet scale 0.2). 16 kHz mono, 8.0 s. Slow: ~100 s per clip (GAPS 2 × 2.5 h).
+- Bug fixes on the way: empty ThinkSound captions must be written as `" "` (pandas reads `''` as NaN); the
+  `foleycrafter` install (moviepy needs `decorator<5`) removed `decorator` from `~/.local`, which `guitar2midi`'s
+  `mir_eval` had silently used → `decorator` installed into the `guitar2midi` env itself.
+
+**Results** (masked; x / y = no prompt / prompt; chance = another clip's real audio):
+
+| dataset (label) | system | note F1@50 | F1@100 | frame F1 | timing F1 | timing F1, other video | onset r | notes/clip |
+|---|---|---|---|---|---|---|---|---|
+| GAPS (real MIDI) | real audio (ceiling) | 93.6 | 93.8 | 82.8 | 95.4 | — | 0.90 | 32.8 (ref 32.4) |
+| | MMAudio | 3.1 / 3.0 | 5.9 / 5.9 | 10.3 / 10.6 | 35.5 / 35.7 | 25.8 | 0.11 / 0.11 | 34 |
+| | **ThinkSound** | 3.0 / 3.4 | 5.9 / 5.7 | 8.2 / 8.1 | **37.6 / 38.8** | 26.4 / 27.4 | **0.16 / 0.18** | 44 |
+| | **FoleyCrafter** | 1.0 / 1.4 | 2.2 / 3.1 | 5.1 / 5.6 | 20.4 / 24.8 | 21.3 / 24.2 | 0.00 / 0.01 | 22–27 |
+| | chance | 2.1 | 4.0 | 9.8 | 28.1 | | | |
+| GuiFiR-Vid (pseudo-GT) | MMAudio | 2.7 / 2.8 | 5.8 / 5.3 | 10.8 / 11.0 | 27.5 / 28.0 | 26.7 | 0.01 / 0.03 | 38 |
+| | **ThinkSound** | 3.0 / 3.0 | 5.2 / 5.8 | 8.9 / 10.7 | **35.5 / 35.9** | 24.9 / 25.0 | **0.15 / 0.16** | 47–52 (ref 31.5) |
+| | **FoleyCrafter** | 1.0 / 1.1 | 2.0 / 1.5 | 5.1 / 4.3 | 16.2 / 19.8 | 16.3 / 19.4 | −0.01 / −0.02 | 19–21 |
+| | chance | 1.6 | 3.5 | 9.4 | 29.3 | | | |
+| magcil (pseudo-GT) | MMAudio | 5.9 / 6.6 | 11.2 / 12.6 | 7.0 / 8.4 | 46.8 / 49.9 | 44.0 | 0.07 / 0.08 | 43–47 |
+| | **ThinkSound** | 5.9 / 5.1 | 8.6 / 7.6 | 6.1 / 5.9 | 54.7 / 52.0 | 45.5 / 45.0 | 0.04 / 0.03 | 88–92 (ref 50.8) |
+| | **FoleyCrafter** | 0.9 / 0.1 | 2.1 / 0.7 | 3.3 / 1.7 | 28.1 / 13.7 | 28.2 / 13.8 | 0.01 / 0.02 | 9–18 |
+| | chance | 4.3 | 7.3 | 5.2 | 52.1 | | | |
+
+Matched vs other video (paired Wilcoxon, timing F1 / onset r): ThinkSound GAPS p 2e-5 / 6e-8 (prompt 3e-5 / 2e-8),
+GuiFiR p 0.011 / 0.007 (prompt 0.007 / 0.007), magcil p 0.05 / 0.27 (prompt 0.20 / 0.39); FoleyCrafter p ≥ 0.6
+everywhere; MMAudio (CP9) only on GAPS.
+
+GuiFiR tab recall (onset, high-E first + capo; reference 69.9 %, chance 3.0 %, MMAudio 6.1 / 5.3 %):
+**ThinkSound 5.6 / 5.5 %**, **FoleyCrafter 1.9 / 1.6 %** (median per clip 4.1–4.7 % / 0 %).
+
+**Reading.**
+- **No model gets the pitches.** Note F1 stays at chance level for all three V2A models on all three datasets
+  (best 3.4 % on GAPS vs chance 2.1 %; ceiling 93.6 %), and tab recall is near chance (≤ 6 % vs 70 % reference).
+- **ThinkSound follows the video's timing best**: its pluck times beat the other-video control on GAPS and, unlike
+  MMAudio, also on GuiFiR (35.5 vs 25 timing F1, p ≈ 0.01); on magcil (fast electric exercises) not significantly.
+  The spectrograms show ThinkSound changing sound where the real chords change (e.g. `SomeoneYouLoved_6_g1` at ~2.1,
+  4.3, 6.5 s). It plays more notes than the reference (44 vs 32 GAPS, ~90 vs 51 magcil), which helps timing recall.
+  The prompt changes little (as for MMAudio).
+- **FoleyCrafter does not follow the video**: matched = other video on every metric (p ≥ 0.6), below chance in note
+  F1, fewer notes than the reference, smeared spectrograms. Expected from its design: the visual content enters as
+  one averaged CLIP vector (no time), timing only through a coarse on/off mask; Auffusion at 16 kHz.
+- So for the thesis: three V2A model families (flow matching MMAudio, MLLM-guided ThinkSound, adapter-on-T2A
+  FoleyCrafter) all fail at the notes; the best one gets some rhythm from the video. This is the motivation for a
+  visual model that reads the fretboard (CP16 onwards).
+
+Examples: `data/interim/<clips-dir>/examples/*__spectrograms.png` (all systems stacked, reference notes white);
+listening files `examples/<clip>__thinksound_*.mp4`, `__foleycrafter_*.mp4` where a real example existed.
+
+**Not done in CP13:** PrismAudio (backup, not needed: ThinkSound already covers the MLLM-guided family);
+HunyuanVideo-Foley (EU licence). The CP11 results table (`30i`) gets the new rows in CP17.

@@ -153,3 +153,116 @@ class WindowFeatureExtractor:
                           "std": dist.std[0].transpose(0, 1).float().cpu().numpy(),
                           "rms_db": float(20 * np.log10(np.sqrt(np.mean(wav ** 2)) + 1e-9))}
         return res
+
+
+# ---------------------------------------------------------------- training (env mmaudio; step 16b/16c)
+# MMAudio's training settings (its config/train_config.yaml + base_config.yaml, runner.py):
+LORA_TARGETS = ("attn.qkv", "linear1", "ffn.w1", "ffn.w2", "ffn.w3")  # attention in-projection, attention output,
+# MLP; in all 21 blocks (latent/clip/text streams of the 7 joint blocks + 14 fused blocks). Not adaLN_modulation
+# (the time/condition modulation) and not the input projections.
+NULL_COND_P = 0.1          # null_condition_probability: video / text each replaced by "empty" 10 % of the time
+T_MEAN, T_SCALE = 0.0, 1.0  # sampling.mean / scale: t = sigmoid(N(0, 1)) (log-normal sampling of the noise level)
+
+
+def load_features(feat_dir: Path, pieces: list[str], per_piece: int | None = None) -> dict:
+    """Stored windows of ``pieces`` as CPU tensors (clip/sync fp16, mean/std fp32), all or the first ``per_piece``
+    windows of each piece, plus ``other``: for each window a fixed window of another piece (video control)."""
+    import torch
+
+    parts = {k: [] for k in ("clip", "sync", "mean", "std")}
+    ids = []
+    for piece in pieces:
+        z = np.load(feat_dir / f"{piece}.npz")
+        n = len(z["start_s"]) if per_piece is None else min(per_piece, len(z["start_s"]))
+        for k in parts:
+            parts[k].append(z[k][:n])
+        ids += [f"{piece}_{int(round(s * 1000)):07d}" for s in z["start_s"][:n]]
+    out = {k: torch.from_numpy(np.concatenate(v)) for k, v in parts.items()}
+    out["ids"] = ids
+    piece_of = np.array([i.rsplit("_", 1)[0] for i in ids])
+    rng = np.random.default_rng(0)
+    out["other"] = torch.tensor([rng.choice(np.flatnonzero(piece_of != p)) if (piece_of != p).any() else i
+                                 for i, p in enumerate(piece_of)])
+    return out
+
+
+class LoRATrainer:
+    """MMAudio large_44k_v2 (frozen, fp32 weights, bf16 autocast as MMAudio's own training) + LoRA adapters.
+
+    ``video=False`` = control run B: the video features are always MMAudio's learned "empty video" features, so the
+    adapters can only learn what the audio of guitar videos sounds like in general, not what this video shows.
+    """
+
+    def __init__(self, text_features: np.ndarray, rank: int = 16, alpha: float | None = None, video: bool = True,
+                 weights_dir: Path | None = None, device: str = "cuda", seed: int = 0):
+        import torch
+        from mmaudio.eval_utils import all_model_cfg
+        from mmaudio.model.flow_matching import FlowMatching
+        from mmaudio.model.networks import get_my_mmaudio
+
+        from guitar2midi.baselines import lora
+        from guitar2midi.baselines.v2a_mmaudio import WEIGHTS_DIR, _relocate
+
+        self.torch, self.device, self.video = torch, device, video
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        cfg = _relocate(all_model_cfg["large_44k_v2"], weights_dir or WEIGHTS_DIR)
+        cfg.download_if_needed()
+        self.net = get_my_mmaudio(cfg.model_name).to(device).eval()  # eval: no dropout in MMAudio anyway
+        self.net.load_weights(torch.load(cfg.model_path, map_location=device, weights_only=True))
+        self.n_total = sum(p.numel() for p in self.net.parameters())
+        self.wrapped = lora.add_lora(self.net, rank, alpha, LORA_TARGETS, within=("joint_blocks", "fused_blocks"))
+        self.params = lora.lora_parameters(self.net)
+        self.n_lora = sum(p.numel() for p in self.params)
+        self.fm = FlowMatching(min_sigma=0.0)
+        self.text = torch.from_numpy(np.asarray(text_features)).float().to(device)
+        self.rng = torch.Generator(device=device).manual_seed(seed)
+        self.lora = lora
+
+    def _batch(self, data: dict, idx, gen, dropout: bool, video_mode: str = "own"):
+        """Conditions and noised latents for windows ``idx`` (MMAudio's train_fn / val_fn)."""
+        torch, net, dev = self.torch, self.net, self.device
+        bs = len(idx)
+        vid = data["other"][idx] if video_mode == "other" else idx  # "other": a window of another piece (control)
+        clip = data["clip"][vid].to(dev).float()
+        sync = data["sync"][vid].to(dev).float()
+        text = self.text[None].expand(bs, -1, -1).clone()
+        mean, std = data["mean"][idx].to(dev), data["std"][idx].to(dev)
+        x1 = mean + std * torch.empty_like(mean).normal_(generator=gen)
+        x1 = net.normalize(x1)
+        t = torch.sigmoid(torch.randn(bs, device=dev, generator=gen) * T_SCALE + T_MEAN)
+        x0 = torch.empty_like(x1).normal_(generator=gen)
+        xt = self.fm.get_conditional_flow(x0, x1, t)
+        null_v = torch.rand(bs, device=dev, generator=gen) < NULL_COND_P
+        null_t = torch.rand(bs, device=dev, generator=gen) < NULL_COND_P
+        if not dropout:
+            null_v[:], null_t[:] = False, False
+        if not self.video or video_mode == "blank":
+            null_v[:] = True
+        clip[null_v] = net.empty_clip_feat
+        sync[null_v] = net.empty_sync_feat
+        text[null_t] = net.empty_string_feat
+        return xt, clip, sync, text, t, x0, x1
+
+    def loss(self, data: dict, idx, gen=None, dropout: bool = True, video_mode: str = "own"):
+        """Per-window flow-matching loss (B,)."""
+        torch = self.torch
+        xt, clip, sync, text, t, x0, x1 = self._batch(data, idx, gen or self.rng, dropout, video_mode)
+        with torch.autocast("cuda", dtype=torch.bfloat16):
+            pred = self.net(xt, clip, sync, text, t)
+        return self.fm.loss(pred.float(), x0, x1)
+
+    def eval_loss(self, data: dict, batch: int = 16, seed: int = 1234, video_mode: str = "own") -> np.ndarray:
+        """Per-window loss with fixed noise / noise levels (same draws every call, so curves are comparable) and no
+        condition dropout. video_mode: own / other (a window of another piece) / blank (empty video)."""
+        torch = self.torch
+        gen = torch.Generator(device=self.device).manual_seed(seed)
+        out = []
+        with torch.no_grad():
+            for i in range(0, len(data["ids"]), batch):
+                idx = torch.arange(i, min(i + batch, len(data["ids"])))
+                out.append(self.loss(data, idx, gen, dropout=False, video_mode=video_mode).cpu().numpy())
+        return np.concatenate(out)
+
+    def adapters(self) -> dict:
+        return self.lora.lora_state_dict(self.net)

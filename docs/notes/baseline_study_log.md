@@ -1091,3 +1091,47 @@ back to sound (VAE decoder + BigVGAN vocoder) vs the real audio of 4 windows (tr
 median): spectrograms nearly identical, GAPS notes on the harmonics, loudness-envelope correlation 0.91 / 0.92 /
 0.86 / 0.94 (quiet window lowest: noise floor). So the training target is the real guitar audio of that window,
 in sync with the video features.
+
+## CP16 step 16b — LoRA wrapper and 8-clip sanity run (2026-11-26)
+
+Code: `guitar2midi.baselines.lora` (own LoRA, ~100 lines: `LoRALinear`, `LoRAConv1d`, `add_lora`, `merge_lora`,
+save/load), `mmaudio_lora.LoRATrainer` + `load_features`, `scripts/34d_train_lora.py` (env mmaudio),
+`scripts/34e_plot_lora_curves.py` (env guitar2midi).
+
+**Where the adapters sit.** Most of MMAudio's projections are not linear layers but 1-D convolutions with kernel 3
+(`ChannelLastConv1d`: the attention output `linear1` and the MLP `ffn.w1/w2/w3` in the latent and clip streams and in
+all 14 fused blocks); only the text stream uses `nn.Linear`. So the wrapper handles both: for a convolution, A is a
+kernel-3 conv in → r and B a 1×1 conv r → out (the usual LoRA form for convolutions, as in `peft`). Targets in all
+21 blocks: `attn.qkv`, `linear1`, `ffn.w1/w2/w3` = **167 layers, 12.96 M trainable numbers = 1.26 % of the 1,030.6 M**
+(plan estimate 15–20 M). Not adapted: `adaLN_modulation` (time/condition modulation), input projections, the learned
+empty-video/empty-text features (MMAudio trains those; here frozen).
+
+**Training step** = MMAudio's `train_fn` / settings from its `train_config.yaml` + `base_config.yaml`: latent
+x1 = mean + std·noise, normalised; t = sigmoid(N(0, 1)); x_t = (1−t)·x0 + t·x1; loss = ‖v_pred − (x1 − x0)‖²; video
+and text each replaced by the empty features with p = 0.1; AdamW betas 0.9/0.95, eps 1e-6, weight decay 1e-6,
+grad-norm clip 1.0, bf16 autocast on fp32 weights, linear warm-up (MMAudio: 1,000 steps for training from scratch;
+ours 200). Run B (`--no-video`): video features always the empty ones.
+**Validation loss** with fixed noise / t draws (same every time → comparable points) and no condition dropout, three
+ways: own video, a fixed window of **another piece** (the other-video control of the evaluation), blank video.
+Cost: 9.6 GB GPU, 0.24 s per step of batch 8 → a 6,000-step run ≈ 25 min + validation (plan guessed 2–3 h).
+Adapter file 52 MB (fp32).
+
+**Checks.**
+- Merge: folding the adapters into the base weights (`merge_lora`, needed for generation in 16d) gives the same val
+  loss (0.56858 → 0.56853, max per-window diff 0.0002 = bf16 rounding).
+- Sanity run, 8 windows from 8 random train pieces (seed 0), train = val, 400 steps, batch 8
+  (`outputs/runs/2026-11-26_cp16_lora_sanity{,_lr1e-3}/`, `curves.png`):
+
+| lr | val loss own video, step 0 → 400 | another piece's video | blank video |
+|---|---|---|---|
+| 1e-4 (plan) | 0.700 → 0.569 (−19 %, still falling) | 0.711 → 0.626 | 0.697 → 0.595 |
+| 1e-3 | 0.700 → **0.086** (−88 %) | 0.711 → 0.271 | 0.697 → 0.136 |
+
+  The setup can memorise: with lr 1e-3 the loss on the 8 clips drops by 88 %. With the planned lr 1e-4 it learns
+  steadily but slowly (8 clips, 400 steps); the real runs have 6,000 steps on 5,630 windows, so lr 1e-4 stays the
+  start value. Own video < blank < another piece's video: the adapters use the video to tell which clip's audio to
+  produce (a wrong video now misleads). Blank also drops because the noisy latent x_t itself reveals which of the
+  8 clips it is at high t.
+- Side finding (zero-shot, step 0): on these 8 windows MMAudio's loss is *lower* with a blank video (0.697) than
+  with the right one (0.700): the original model gets nothing useful for the audio out of our guitar videos.
+  Checked on the full validation part in 16c (step 0 of run A).

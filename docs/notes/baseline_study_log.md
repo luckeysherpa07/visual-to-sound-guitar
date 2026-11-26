@@ -1135,3 +1135,47 @@ Adapter file 52 MB (fp32).
 - Side finding (zero-shot, step 0): on these 8 windows MMAudio's loss is *lower* with a blank video (0.697) than
   with the right one (0.700): the original model gets nothing useful for the audio out of our guitar videos.
   Checked on the full validation part in 16c (step 0 of run A).
+
+## CP16 step 16c — LoRA runs A (video + text) and B (video blanked) (2026-11-26)
+
+Runs `outputs/runs/2026-11-26_cp16_lora_{A,B}/` (`34d`, plan settings: rank 16, lr 1e-4, 200 warm-up steps,
+batch 8, 6,000 steps = 8.5 epochs over the 5,630 train windows; 25 min each). Curves:
+`outputs/runs/2026-11-26_cp16_lora_A/curves_A_B.png` (`34e`). Per-window comparison on the 586 validation windows
+(unseen performers, fixed noise draws): `scripts/34f_compare_lora_val.py` → `outputs/runs/2026-11-26_cp16_lora_val_compare/`.
+
+**Curves.** Both runs: validation loss drops in the first ~1,000 steps, then flattens; no overfitting (train ≈ val,
+validation still at its lowest at the end: best step A 6,000, B 5,000). LoRA at lr 1e-4 found a small, stable change
+and stopped there.
+
+| model | own video | another piece's video | blank video |
+|---|---|---|---|
+| MMAudio zero-shot | 0.6342 | 0.6534 | 0.6366 |
+| LoRA A (video + text) | **0.6151** | 0.6363 | 0.6228 |
+| LoRA B (video blanked in training) | 0.6180 | 0.6367 | 0.6222 |
+
+Paired per-window tests (Wilcoxon):
+- A own vs zero-shot own: −0.019 (lower on 99 % of windows). B vs zero-shot, both blank: −0.014 (97 %).
+  → **about three quarters of A's gain is also reached without the video** (B): "sounds like GAPS guitar audio".
+- A own vs B blank: −0.007, p = 5e-7, but lower on only 49.5 % of windows: **10 % of the windows give 70 % of the
+  gain**, median difference 0.000; not related to notes per window (Spearman 0.05) or loudness (0.03).
+- How much A uses the video: own − blank gap −0.0077 (zero-shot −0.0024; the gap grew on 88 % of windows,
+  p < 1e-10); own − other-piece gap −0.021 (zero-shot −0.019; grew slightly, p = 4e-10).
+- Correction of the 16b side finding: on all 586 windows zero-shot MMAudio is slightly better with the right video
+  than blank (−0.0024, p = 0.02) and clearly better than with another piece's video (−0.019): the video carries
+  some information for the audio (likely timing/loudness/scene), but only a little.
+
+Loss numbers do not say whether the **notes** are right (the loss also scores timbre, room, noise). That is 16d.
+
+**Generation check** (5 GAPS test clips, seed 42, `30c --lora … --tag`; spectrograms
+`data/interim/baseline_clips/examples/{019_Vpswc_c1,027_Zpswc_c1}__spectrograms_cp16.png`): A sounds like plucked
+guitar with the same event timing as zero-shot (e.g. the gap at 3.2 s in 027_Zpswc_c1 in all video-conditioned
+versions) and more bass energy; the pitches still do not follow the GT notes visibly. Generation with merged
+adapters is as fast as zero-shot (~3 s per clip).
+**B blank at generation produces the same audio for every clip** (no video input, same seed, same length: 5/5
+identical files). As a system it is "guitar sound from text only" (a learned prior); its note F1 can only be chance
+level. B's adapters can also be run *with* the video (val loss 0.6180, between A and B blank): that variant
+("guitar-sound adaptation + MMAudio's original video use") is the fairer control for "did training on paired video
+add anything", so 16d evaluates both B variants.
+
+Code: `MMAudioGenerator(lora=…, no_video=…)` (adapters merged in fp32, then bf16), `30c --lora --tag --no-video`
+(systems `mmaudio_<tag>_{noprompt,prompt}`), `30c_plot_spectrograms --systems --suffix`.

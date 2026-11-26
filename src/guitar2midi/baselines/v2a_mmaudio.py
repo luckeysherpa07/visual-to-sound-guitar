@@ -25,7 +25,10 @@ def _relocate(cfg, root: Path):
 
 class MMAudioGenerator:
     def __init__(self, variant: str = "large_44k_v2", num_steps: int = 25, cfg_strength: float = 4.5,
-                 full_precision: bool = False, weights_dir: Path = WEIGHTS_DIR):
+                 full_precision: bool = False, weights_dir: Path = WEIGHTS_DIR, lora: Path | None = None,
+                 no_video: bool = False):
+        """lora: adapters_*.pt of a CP16 run (34d; its config.json next to it gives rank/alpha), merged into the
+        weights before casting to bf16. no_video: generate with MMAudio's empty video features (CP16 run B)."""
         import torch
         from mmaudio.eval_utils import all_model_cfg
         from mmaudio.model.flow_matching import FlowMatching
@@ -38,8 +41,21 @@ class MMAudioGenerator:
         self.cfg.download_if_needed()
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         dtype = torch.float32 if full_precision else torch.bfloat16
-        self.net = get_my_mmaudio(self.cfg.model_name).to(self.device, dtype).eval()
+        self.net = get_my_mmaudio(self.cfg.model_name).to(self.device).eval()
         self.net.load_weights(torch.load(self.cfg.model_path, map_location=self.device, weights_only=True))
+        if lora is not None:
+            import json
+
+            from guitar2midi.baselines import lora as lora_lib
+            from guitar2midi.baselines.mmaudio_lora import LORA_TARGETS
+
+            run_cfg = json.loads((Path(lora).parent / "config.json").read_text())
+            lora_lib.add_lora(self.net, run_cfg["rank"], run_cfg["alpha"], LORA_TARGETS,
+                              within=("joint_blocks", "fused_blocks"))
+            lora_lib.load_lora(self.net, torch.load(lora, map_location=self.device, weights_only=True))
+            lora_lib.merge_lora(self.net)
+        self.net = self.net.to(dtype)
+        self.no_video = no_video
         self.fm = FlowMatching(min_sigma=0, inference_mode="euler", num_steps=num_steps)
         self.features = FeaturesUtils(tod_vae_ckpt=self.cfg.vae_path, synchformer_ckpt=self.cfg.synchformer_ckpt,
                                       enable_conditions=True, mode=self.cfg.mode,
@@ -56,8 +72,8 @@ class MMAudioGenerator:
 
         with torch.inference_mode():
             info = load_video(Path(video), duration)
-            clip = None if mask_away_clip else info.clip_frames.unsqueeze(0)
-            sync = info.sync_frames.unsqueeze(0)
+            clip = None if (mask_away_clip or self.no_video) else info.clip_frames.unsqueeze(0)
+            sync = None if self.no_video else info.sync_frames.unsqueeze(0)
             seq = self.cfg.seq_cfg
             seq.duration = info.duration_sec
             self.net.update_seq_lengths(seq.latent_seq_len, seq.clip_seq_len, seq.sync_seq_len)

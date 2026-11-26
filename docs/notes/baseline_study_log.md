@@ -886,4 +886,12 @@ Examples: `data/interim/<clips-dir>/examples/*__spectrograms.png` (all systems s
 listening files `examples/<clip>__thinksound_*.mp4`, `__foleycrafter_*.mp4` where a real example existed.
 
 **Not done in CP13:** PrismAudio (backup, not needed: ThinkSound already covers the MLLM-guided family);
-HunyuanVideo-Foley (EU licence). The CP11 results table (`30i`) gets the new rows in CP18.
+HunyuanVideo-Foley (EU licence).
+
+**Results table updated early (2026-11-26, Luckey's request):** `30i` now reads the CP13 runs
+(`2026-11-26_cp13_v2a_*`, identical numbers for the CP11 systems) and has ThinkSound / FoleyCrafter rows (± prompt)
+in every dataset block. The "MMAudio, other video" row is replaced by a star per model (own video better than
+another piece's video, paired Wilcoxon p < 0.05; all matched/mismatched means in `tests.csv`). Output
+`thesis/tables/baseline_results.tex`, `outputs/runs/2026-11-26_results_table/`. Stars: MMAudio GAPS (note, timing,
+onset r); ThinkSound GAPS (note, timing, onset r), GuiFiR (timing, onset r), magcil (note F1 only: 5.9 vs 1.9 with
+another video, but chance = 4.3); FoleyCrafter none. CP14–CP17 rows follow in CP18.

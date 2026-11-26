@@ -228,7 +228,7 @@ scripts/       thin numbered entry points
            31a_make_guifir_clips + 31a_check_guifir_tab (CP7, → data/interim/baseline_clips_guifir/; 30d takes --clips-dir);
            31b_make_magcil_clips + 31b_spot_check_magcil (CP8, → data/interim/baseline_clips_magcil/); 30f_* take --clips-dir, 30f_prepare_strip_frames --no-cuts;
            CP9/CP10: 30c_run_mmaudio, 30c_plot_spectrograms, 30e (--clips <dir>; reference = midi/ or transcriptions/real_audio, per-clip length_s), 30g_run_v2n (--clips-dir, --flip/--layout/--norm variants), 30g_v2n_recheck, 30g_strip_stats;
-           CP11: 30i_results_table (→ thesis/tables/baseline_results.tex; main.tex loads multirow);
+           CP11: 30i_results_table (→ thesis/tables/baseline_results.tex + outputs/runs/<date>_results_table/; main.tex loads multirow; since Nov 26 reads the CP13 runs and has the ThinkSound/FoleyCrafter rows, star = own video beats another piece's video per model);
            CP12: 30j_make_full_strips (→ <clips-dir>/strips_full/, from strips/<clip>_corners.npy);
            CP13: 30k_run_thinksound (env thinksound), 30l_run_foleycrafter (env foleycrafter); then 30d/30e/30c/31a as for MMAudio;
            planned 30h_finetune_v2n (CP17)

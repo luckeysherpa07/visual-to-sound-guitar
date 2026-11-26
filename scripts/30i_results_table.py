@@ -1,22 +1,26 @@
-"""CP11: baseline results table for all datasets (env guitar2midi).
+"""Baseline results table for all datasets (CP11, extended with the CP13 V2A rows; env guitar2midi).
 
     python scripts/30i_results_table.py
 
 Reads one 30e run per dataset (all systems, masked to the clips/frames with strips):
-    outputs/runs/2026-11-24_cp11_{gaps,guifir,magcil}/per_clip.csv
-created with
-    python scripts/30e_evaluate_baselines.py --clips <clips-dir> --run-name cp11_<ds> --mask-dir <clips-dir>/strips \\
-        --systems real_audio mmaudio_noprompt mmaudio_prompt v2n_zeroshot silence --shuffled real_audio mmaudio_noprompt
+    outputs/runs/2026-11-26_cp13_v2a_{gaps,guifir,magcil}/per_clip.csv
+created with (outputs/logs/cp13_evaluate.sh)
+    python scripts/30e_evaluate_baselines.py --clips <clips-dir> --run-name cp13_v2a_<ds> --mask-dir <clips-dir>/strips \\
+        --systems real_audio mmaudio_noprompt mmaudio_prompt thinksound_noprompt thinksound_prompt \\
+                  foleycrafter_noprompt foleycrafter_prompt v2n_zeroshot silence \\
+        --shuffled real_audio mmaudio_noprompt thinksound_noprompt thinksound_prompt foleycrafter_noprompt foleycrafter_prompt
+(the CP11 runs 2026-11-24_cp11_* give identical numbers for the systems they contain)
 and adds for GuiFiR-Vid the tab recall (share of the manual tab pitches found as onsets within +-100 ms,
 ``clips_guifir.tab_recall``, reading high E first + capo), with the same shuffled pairing as 30e.
 
 Rows per dataset: real audio (GAPS: ceiling; pseudo-GT sets: the reference itself, 100 by construction, so only
-its tab recall is shown), MMAudio without / with prompt, V2N zero-shot, MMAudio with a mismatched video
-(another piece's clip), chance (real-audio transcription of another piece) and silence.
-Significance: paired Wilcoxon over clips, MMAudio (no prompt) vs the same system with a mismatched video;
-* = p < 0.05.
+its tab recall is shown), MMAudio / ThinkSound / FoleyCrafter without / with prompt, V2N zero-shot, chance
+(real-audio transcription of another piece) and silence.
+Significance: for every system that has a ``<system>@shuffled`` run (the same model given another piece's video),
+paired Wilcoxon over clips, matched vs mismatched video; * = p < 0.05 and matched better. All matched/mismatched
+means are in tests.csv.
 
-Writes thesis/tables/baseline_results.tex and outputs/runs/<date>_cp11_results_table/{table.md, table.csv, tests.csv}.
+Writes thesis/tables/baseline_results.tex and outputs/runs/<date>_results_table/{table.md, table.csv, tests.csv}.
 """
 
 import argparse
@@ -32,16 +36,19 @@ from scipy.stats import wilcoxon
 from guitar2midi.baselines import clips_guifir as G
 
 DATASETS = [  # name in table, run, clips dir, label source
-    ("GAPS", "2026-11-24_cp11_gaps", Path("data/interim/baseline_clips"), "real MIDI"),
-    ("GuiFiR-Vid", "2026-11-24_cp11_guifir", Path("data/interim/baseline_clips_guifir"), "pseudo-GT"),
-    ("magcil", "2026-11-24_cp11_magcil", Path("data/interim/baseline_clips_magcil"), "pseudo-GT"),
+    ("GAPS", "2026-11-26_cp13_v2a_gaps", Path("data/interim/baseline_clips"), "real MIDI"),
+    ("GuiFiR-Vid", "2026-11-26_cp13_v2a_guifir", Path("data/interim/baseline_clips_guifir"), "pseudo-GT"),
+    ("magcil", "2026-11-26_cp13_v2a_magcil", Path("data/interim/baseline_clips_magcil"), "pseudo-GT"),
 ]
 ROWS = [  # system in per_clip.csv, label
     ("real_audio", "Real audio"),
     ("mmaudio_noprompt", "MMAudio (video)"),
     ("mmaudio_prompt", "MMAudio (+ prompt)"),
+    ("thinksound_noprompt", "ThinkSound (video)"),
+    ("thinksound_prompt", "ThinkSound (+ prompt)"),
+    ("foleycrafter_noprompt", "FoleyCrafter (video)"),
+    ("foleycrafter_prompt", "FoleyCrafter (+ prompt)"),
     ("v2n_zeroshot", "V2N zero-shot"),
-    ("mmaudio_noprompt@shuffled", "MMAudio, other video"),
     ("real_audio@shuffled", "Chance (other piece)"),
     ("silence", "Silence"),
 ]
@@ -94,21 +101,26 @@ def main() -> None:
         clip_ids = list(by["real_audio"])
         groups = [by["real_audio"][c]["group"] for c in clip_ids]
         tab = tab_column(clips_dir, clip_ids, groups) if (clips_dir / "tab").is_dir() else {}
-        sig = {}
-        for k in TESTED:
-            a = np.array([float(by["mmaudio_noprompt"][c][k]) for c in clip_ids])
-            b = np.array([float(by["mmaudio_noprompt@shuffled"][c][k]) for c in clip_ids])
-            pval = float(wilcoxon(a, b).pvalue) if np.any(a != b) else 1.0
-            sig[k] = pval < 0.05 and a.mean() > b.mean()
-            tests.append({"dataset": name, "metric": k, "matched": round(a.mean(), 4), "mismatched": round(b.mean(), 4),
-                          "better_share": round(float(np.mean(a > b)), 3), "p": f"{pval:.2g}"})
+        sig = {}  # system -> metric -> matched video significantly better than another piece's video
+        for system, _ in ROWS:
+            if system == "real_audio" or f"{system}@shuffled" not in by:
+                continue
+            sig[system] = {}
+            for k in TESTED:
+                a = np.array([float(by[system][c][k]) for c in clip_ids])
+                b = np.array([float(by[f"{system}@shuffled"][c][k]) for c in clip_ids])
+                pval = float(wilcoxon(a, b).pvalue) if np.any(a != b) else 1.0
+                sig[system][k] = pval < 0.05 and a.mean() > b.mean()
+                tests.append({"dataset": name, "system": system, "metric": k, "matched": round(a.mean(), 4),
+                              "mismatched": round(b.mean(), 4), "better_share": round(float(np.mean(a > b)), 3),
+                              "p": f"{pval:.2g}"})
         for system, label in ROWS:
             vals = {k: float(np.mean([float(by[system][c][k]) for c in clip_ids])) * s for k, _, s in COLS}
             pseudo_ref = system == "real_audio" and source != "real MIDI"
             table.append({"dataset": name, "label_source": source, "clips": len(clip_ids), "system": label,
                           **{k: (None if pseudo_ref else vals[k]) for k, _, _ in COLS},
                           "tab_recall": tab.get(system), "notes_per_clip": float(np.mean([float(by[system][c]["n_est"]) for c in clip_ids])),
-                          "sig": {k: sig[k] for k in TESTED} if system == "mmaudio_noprompt" else {}})
+                          "sig": sig.get(system, {})})
 
     def cell(r, k, fmt):
         v = r[k]
@@ -131,13 +143,14 @@ def main() -> None:
                "ignores pitch; chroma = chroma similarity; onset r = correlation of onset curves; tab recall = share of "
                "GuiFiR's manual tab pitches found as onsets, ±100 ms). GAPS is scored against real MIDI; GuiFiR-Vid and "
                "magcil against the transcription of the real audio (pseudo-GT), whose own row is therefore omitted. "
-               "* = MMAudio better than with a mismatched video, paired Wilcoxon p < 0.05.\n\n" + "\n".join(md) + "\n")
+               "* = the model is better with the clip's own video than with another piece's video, paired Wilcoxon p < 0.05 "
+               "(not tested for MMAudio + prompt).\n\n" + "\n".join(md) + "\n")
 
     # LaTeX (booktabs)
     cols = "l" + "r" * (len(COLS) + 1)
     ncol = len(COLS) + 2
     tex = [r"% generated by scripts/30i_results_table.py -- do not edit by hand", r"\begin{table}[t]", r"\centering",
-           r"\small", r"\setlength{\tabcolsep}{3.5pt}", rf"\begin{{tabular}}{{{cols}}}", r"\toprule",
+           r"\small", r"\setlength{\tabcolsep}{3pt}", rf"\begin{{tabular}}{{{cols}}}", r"\toprule",
            # two header lines with short labels, so the table fits \textwidth at \small without scaling
            # dataset = a header row above its block (no separate column), so the table fits \textwidth
            r" & \multicolumn{2}{c}{Note F1} & Frame & Timing & Chroma & Onset & Tab \\",
@@ -159,15 +172,16 @@ def main() -> None:
             r"similarity; onset $r$ = correlation of onset curves; tab rec.\ = share of GuiFiR's manual tablature "
             r"pitches found as onsets ($\pm$100\,ms). GAPS is scored against real MIDI, GuiFiR-Vid and magcil against "
             r"the transcription of the real audio (pseudo-GT; its own row is omitted there). Real audio on GAPS = "
-            r"transcription ceiling. MMAudio, other video = MMAudio given the video of another piece. "
-            r"Chance = real-audio transcription of another piece. $^{*}$ MMAudio better than "
-            r"with the other video (paired Wilcoxon, $p<0.05$).}",
+            r"transcription ceiling. "
+            r"Chance = real-audio transcription of another piece. $^{*}$ The model is better with the clip's own "
+            r"video than with the video of another piece (paired Wilcoxon, $p<0.05$; not tested for MMAudio + "
+            r"prompt).}",
             r"\label{tab:baseline_results}", r"\end{table}", ""]
     tex_text = "\n".join(tex).replace(r"(ref.)", "--")
 
     args.tex.parent.mkdir(parents=True, exist_ok=True)
     args.tex.write_text(tex_text)
-    out = args.runs / f"{date.today().isoformat()}_cp11_results_table"
+    out = args.runs / f"{date.today().isoformat()}_results_table"
     out.mkdir(parents=True, exist_ok=True)
     (out / "table.md").write_text(md_text)
     with open(out / "table.csv", "w", newline="") as f:
@@ -180,9 +194,10 @@ def main() -> None:
         w.writeheader()
         w.writerows(tests)
     print(md_text)
-    print("MMAudio (no prompt) vs mismatched video:")
+    print("Own video vs another piece's video:")
     for t in tests:
-        print(f"  {t['dataset']:11s} {t['metric']:11s} {t['matched']:.3f} vs {t['mismatched']:.3f}  p={t['p']}")
+        print(f"  {t['dataset']:11s} {t['system']:22s} {t['metric']:11s} {t['matched']:.3f} vs "
+              f"{t['mismatched']:.3f}  p={t['p']}")
     print(f"\nwritten: {args.tex}, {out}/table.md, table.csv, tests.csv")
 
 

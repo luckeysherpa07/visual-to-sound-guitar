@@ -1239,3 +1239,41 @@ GuiFiR tab recall (no prompt / prompt): zero-shot 6.1 / 5.3, A 6.6 / 7.7, B (+vi
 (note F1 2.8 vs 1.2, p = 0.014) and magcil (6.6 vs 2.7, p = 0.02); MMAudio without prompt on GuiFiR / magcil stays
 n.s. Small effects at chance level, but the earlier wording "beats a mismatched video only on GAPS" holds for the
 no-prompt row only.
+
+## CP17 step 17a — Shots of the GAPS train/val videos and frames to click (2026-11-27)
+
+**Plan approved** (Luckey, Nov 27): `docs/notes/2026-11-27_cp17_v2n_guitar_plan.md` (supersedes the Nov 24 draft).
+V2N's own `Transcriber_OnsetFrame` (onset + frame heads only, 88 outputs), same performer split as CP16
+(239 train / 28 val pieces, so CP16 and CP17 see exactly the same training pieces), runs A piano-init → D
+full-string strips → B ConvNeXt ImageNet → C scratch, ~20k steps each.
+
+Checked in the V2N code before starting: `Transcriber_OnsetFrame` exists and its layer names (`proj`, `backbone`,
+`onset_head`, `frame_head`) match the piano checkpoint, so A/D can start from the piano weights (offset/velocity
+heads dropped). V2N's `train.py` can only *resume* a run, not start from other weights → our wrapper loads them.
+
+**Why shots and several clicks per video.** The tracker (CP5) follows the clicked corners only inside one camera
+shot; after a cut the fretboard is somewhere else. Many GAPS videos are multi-camera edits, so one click per video
+would lose most of an edited video. Luckey's choice: click the longest shots until ≥ 70 % of the video is covered,
+at most 5 shots per video, shots ≥ 2 s (a V2N record needs ≥ 1 s; 2 s leaves room for context).
+
+**Cut detection on whole performances.** CP5's `detect_cuts` keeps every frame in memory (fine for 8 s, ~20 GB
+for a 5-minute 720p video). New `video.detect_cuts_file`: the same rule, but the video is streamed through
+ffmpeg as 160×90 thumbnails at 25 fps. Check: identical cuts to CP5 on 12 eval clips (8 with cuts, 4 without).
+`scripts/35a_prepare_train_click_frames.py` (all 267 videos in ~3 min, 8 processes).
+
+**Result** (`data/interim/v2n_train/shots.{json,csv}`):
+
+| | value |
+|---|---|
+| videos (train + val) | 267 (14.71 h) |
+| single-shot videos | 47 |
+| cuts per video | median 6, max 204 (`095_Tf1wc`, partly false cuts from zoom/flicker → only lowers its coverage) |
+| shots to click | **652** (train 601, val 51); per video 1: 138, 2: 31, 3: 13, 4: 12, 5: 73 |
+| covered by chosen shots | 11.27 h = **77 %**; 60 videos below 70 % (heavy edits: many short shots) |
+
+Contact sheets: `data/interim/v2n_train/click_frames_sample.jpg` (24 random click frames: mostly medium/wide
+front views, some close-ups; a few title/end cards, e.g. `299_3pswc__s3` → skip with `s`). Cut check: the cuts of
+`049_Fc1wc` / `039_Mc1wc` are real face ↔ hand edits.
+
+**Next (Luckey):** click the 652 frames (`01b_annotate_corners.py`, command in the `35a` docstring; `p` pastes the
+previous shot's clicks for a repeated camera angle, `s` skips shots without a usable fretboard). Then 17b.

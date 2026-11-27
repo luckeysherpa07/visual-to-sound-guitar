@@ -1277,3 +1277,84 @@ front views, some close-ups; a few title/end cards, e.g. `299_3pswc__s3` → ski
 
 **Next (Luckey):** click the 652 frames (`01b_annotate_corners.py`, command in the `35a` docstring; `p` pastes the
 previous shot's clicks for a repeated camera angle, `s` skips shots without a usable fretboard). Then 17b.
+
+## CP17 steps 17b + 17c — Training strips/labels pipeline and V2N training wrapper (2026-11-27)
+
+Built and tested before Luckey's train clicks exist, on two GAPS **test** pieces (019_Vpswc, 027_Zpswc; their CP5
+eval clicks mapped to full-video frames). All dev output went to a scratch folder and is not training data; the
+real 17b run uses only `gaps_train.jsonl`.
+
+### 17b — strips and labels (`baselines/v2n_data.py`, `scripts/35b_make_train_strips.py`)
+
+Per piece: sync lag measured at 20 / 50 / 80 % of the piece (019: 13.1 ms, 027: 36.3 ms = the CP2 values), both
+strip versions from the same tracking (fretboard = CP5 nut → fret 20, full = CP12 nut → bridge), JPEG q95 (V2N's
+setting) into one HDF5 per piece and version; labels per record as V2N TSV (velocity dummy 64) + a GT MIDI for
+V2N's eval callback. Per split one small HDF5 of **external links** to the piece files, so V2N's dataset sees a
+single file and a crash only loses one piece (35b resumes). Records = runs of tracked frames ≥ 2 s inside a
+clicked shot. Disk estimate ~28 GB per strip version (27 KB / frame).
+
+**Why a new tracker.** The CP5 tracker (frame-to-frame optical flow) was checked on 8 s clips; on whole shots it
+fails. First dev drift sheet: in 027 the quad slid off the neck onto the arm/body within ~10 s after the click
+(slow camera zoom), in 019 (slideshow edit with dissolves and picture-in-picture inside one "shot") it followed
+into other scenes. Training on such strips would teach the model arms and backgrounds.
+
+New `fretboard_tracking.track_corners_keyframe`: every frame is matched **directly to the clicked frame** (SIFT
+features inside the guitar region headstock → bridge, ratio test, RANSAC homography, ≥ 25 inliers, convex quad,
+neck length 0.5–2× the click, no jump > 8 % of the neck between frames). Errors cannot add up; a frame that does
+not look like the clicked view is rejected (left out) instead of keeping the last corners. Tracking runs on frames
+scaled to ≤ 640 px (a shot can be 14 min; 1280 px gave hardly more matches at 10× the time).
+
+**Measured against manual clicks** (`35b_check_long_tracking.py`): GAPS test pieces have up to 3 eval clicks at
+different times; when two fall in the same shot, track from one to the other and compare with the manual click
+(error = mean corner distance in % of the neck length; includes the click noise of two manual clicks).
+Interim (first 20 directed pairs, 6 pieces, span median 50 s, max 145 s; final numbers when the run ends):
+
+| tracker | target frame measured | median | p90 | max | pairs > 10 % |
+|---|---|---|---|---|---|
+| CP5 frame-to-frame | 20 / 20 (always gives corners) | 17.1 % | 46.8 % | 260 % | 17 |
+| keyframe (CP17) | 12 / 20 (8 rejected) | 1.9 % | 6.4 % | 6.7 % | 0 |
+
+So the keyframe tracker is either right or says it does not know — the property training data needs.
+
+**Moving reference tried and rejected.** Coverage is the price: in 027 the camera zooms out to half the guitar
+size within 10 s of the click, and only 29–40 % of the shot matches the clicked view. Letting an accepted frame
+become the new reference when matches get weak gave 100 % "tracked" — but after the zoom the quad sat *beside* the
+guitar (the new reference had picked up the guitar wall in the background): confidently wrong, the worst case.
+Kept off (`promote=None`). Instead **a second click round**: `35b` stores every stretch ≥ 10 s of a clicked shot
+without records, `35a --round2` exports one frame per stretch (`<piece>__s<k>g<j>`), Luckey clicks those, 35b
+reruns for those pieces. A click is cheap; a wrong strip is not.
+
+Dev drift sheet with the keyframe tracker: quad on the neck in every sampled frame. Remaining weakness: dissolves
+— while two shots are blended (~1 s) the quad stays on the right guitar but the strip is double-exposed; only at a
+few record edges, accepted.
+
+Checks: `tests/test_v2n_data.py` (env v2n) — run splitting, note shift with the sync lag, our TSV through V2N's own
+`LinearLabeler` (onset at frame 10 = 1.0, neighbours 0.5, note started before the record kept), and an HDF5 with
+external links read by V2N's own `VPTDataset` (shapes (25, 144, 800) / (25, 88), pixel values, labels). 4 / 4 pass.
+
+### 17c — training wrapper (`scripts/35c_train_v2n.py`, `configs/model/v2n_guitar/base.yaml`)
+
+V2N's own `train.py` / HF Trainer, model and data code; V2N repo unmodified. Config = V2N `oofv_1s` + our overrides
+(onset + frame model, loss weights onset 2 / frame 1, 20k steps, no wandb) + run preset A/B/C/D. V2N's trainer can
+only *resume* a run, so for the piano init its `build_model` is wrapped: the model is built as usual, then the
+released PianoVAM weights are loaded.
+
+- **Load check:** all 193 weights of `Transcriber_OnsetFrame` (24.9 M parameters) come from the piano checkpoint;
+  only the offset and velocity heads are dropped. Run B (ConvNeXt-T, ImageNet-22k) builds (41 M).
+- **Memory:** V2N's batch 16 does not fit the 16 GB RTX 4080 (each 1 s sample = 25 frames × a 5-frame window =
+  125 strip images through the ResNet stem). → batch 8 with **gradient accumulation 2**: two half-batches whose
+  gradients are added before one weight update = the same effective batch 16 as V2N. Peak 15.8 GB with
+  `torch.compile`.
+- **Best checkpoint** by validation **note onset F1** (`eval_note/f1`, V2N's own eval callback, 50 ms), not loss,
+  because that is the thesis metric (V2N reports the final checkpoint). The callback only logged to wandb (off), so
+  a small extra callback writes its metrics to `eval_metrics.jsonl`.
+- **Overfit check** (train = validate on one dev record, no augmentation, 300 steps, 3.4 min): val note F1
+  0.82 → 0.89 → 0.90 at steps 100 / 200 / 300, frame F1 0.95; loss 0.116 → 0.008. The pipeline can learn, and the
+  labels are aligned with the strips (a sync error of 1–2 frames would keep F1 far below this at 50 ms).
+- **Inference wrapper** (`V2NTranscriber(model_config=…)`, `30g --config`): loads the trained run; on the whole
+  dev record 94 predicted vs 95 GT notes, onset F1 0.83. With the piano model it gives the same outputs as before
+  (max diff 0.0 between the old and the new code path; ≤ 5e-6 vs the saved CP6 probabilities).
+- **Env:** `v2n` needed `accelerate` and `transformers<5` (V2N's `train.py` passes `warmup_ratio`, removed in 5.x);
+  `h5py` added to `guitar2midi`.
+
+**Next:** Luckey's clicks → `35b` on all clicked pieces (~1–2 h) → `35a --round2` + clicks → 17d runs A → D → B → C.

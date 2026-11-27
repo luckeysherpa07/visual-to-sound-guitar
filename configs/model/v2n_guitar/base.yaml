@@ -1,0 +1,47 @@
+# CP17: V2N trained on guitar strips. Overrides merged onto V2N's own configs/oofv_1s (commit a6408c4) by
+# scripts/35c_train_v2n.py; everything not listed here is V2N's setting (AdamW lr 5e-4, cosine, warmup 5 %,
+# bf16, batch 16, 1 s windows with stride 1 frame, LinearLabeler lenience 2, augmentation without flips).
+# data_dir, output_dir, eval.gt_dir and the run-specific parts (init, backbone) are set by the script.
+
+dataset:
+  hdf5_filename: guitar_v2.hdf5
+  data_dir: processed_v2
+  train:
+    split: [train]
+    batch_size: 8   # V2N: 16; 16 does not fit the RTX 4080 (16 GB) -> 8 x gradient accumulation 2 = same 16
+  val:
+    split: valid
+
+model:
+  transcriber:
+    # onset + frame heads only (no offset / velocity: GAPS velocities are not real, guitar offsets are weak)
+    _target_: model.transcriber.Transcriber_OnsetFrame
+    num_classes: 88   # keep the piano key range: guitar MIDI 40-83 lies inside, piano heads load unchanged
+    dim: 512
+    dropout: 0.5
+    conformer_depth: 3
+    conformer_kernel_size: 31
+
+train:
+  trainer:
+    max_steps: 20000                 # optimiser steps (each = 2 x batch 8)
+    gradient_accumulation_steps: 2
+    eval_steps: 500
+    save_steps: 500
+    save_total_limit: 2
+    load_best_model_at_end: true     # keeps the best checkpoint besides the last one
+    metric_for_best_model: eval_note/f1   # val note onset F1 (50 ms), the thesis metric (V2N: final checkpoint)
+    greater_is_better: true
+    report_to: [none]
+  loss:
+    _target_: criterions.multitask.MultiTaskLoss
+    weights:
+      onset: 2.0
+      frame: 1.0
+  callbacks:
+    - _target_: callbacks.eval.EvalCallback
+      every_n_evals: 1   # needed every eval: it provides eval_note/f1 for the best-checkpoint choice
+      onset_tolerance: 0.05
+      offset_ratio: 0.2
+      offset_mode: key_press
+      stitch_strategy: center

@@ -16,6 +16,10 @@ Then click (GAPS *train* split: may later become FPE training data):
         --source gaps_train --no-shuffle --out data/labels/fretboard_corners/gaps_train.jsonl
 (--web for the browser version; p pastes the previous shot's clicks (same camera angle), s skips a shot
 without a usable fretboard view)
+
+Second round (after 35b_make_train_strips.py): python scripts/35a_prepare_train_click_frames.py --round2
+adds one frame per uncovered stretch (>= 10 s) of a clicked shot as <piece>__s<k>g<j>; click with the same
+01b command (already clicked frames are skipped), then rerun 35b with --redo --pieces <the listed pieces>.
 """
 
 import argparse
@@ -62,14 +66,54 @@ def process(piece: str, args) -> dict:
     return {"piece": piece, "n_frames": n, "cuts": cuts, "chosen": out}
 
 
+def round2(meta_dir: Path, min_s: float) -> None:
+    """Second click round (after 35b): one frame in the middle of every stretch >= ``min_s`` of a clicked shot
+    that got no record (the keyframe tracker only accepts frames that match the clicked view, so a zoom or camera
+    move away from it leaves the rest of the shot uncovered). Each stretch becomes its own mini-shot
+    ``<piece>__s<k>g<j>`` [start, end) in shots.json; then click again and rerun 35b with --redo for these
+    pieces (35b prints them)."""
+    info = json.loads((OUT / "shots.json").read_text())
+    added = []
+    for mf in sorted(meta_dir.glob("*.json")):
+        m = json.loads(mf.read_text())
+        piece = m["piece"]
+        for s in m["shots"]:
+            k = s["shot"].split("__s")[1]
+            if "g" in k:
+                continue  # already a round-2 stretch
+            for j, (a, b) in enumerate(s.get("uncovered", [])):
+                if b - a < min_s * FPS:
+                    continue
+                key = f"{k}g{j}"
+                if any(str(c["shot"]) == key for c in info[piece]["chosen"]):
+                    continue
+                f = (a + b) // 2
+                d = OUT / "click_frames" / f"{piece}__s{key}"
+                d.mkdir(parents=True, exist_ok=True)
+                subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", f"{f / FPS:.3f}", "-i",
+                                str(VIDEOS / f"{piece}.mp4"), "-frames:v", "1", str(d / f"f{f:06d}.png")], check=True)
+                info[piece]["chosen"].append({"shot": key, "start": a, "end": b, "click_frame": f})
+                added.append((piece, key, (b - a) / FPS))
+    (OUT / "shots.json").write_text(json.dumps(info, indent=1))
+    print(f"round 2: {len(added)} new frames to click, {sum(x[2] for x in added) / 3600:.2f} h of uncovered shot "
+          f"time, {len({x[0] for x in added})} pieces: {sorted({x[0] for x in added})}")
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--round2", action="store_true",
+                   help="after 35b: frames for the uncovered stretches of clicked shots (see round2())")
+    p.add_argument("--round2-min-s", type=float, default=10.0)
+    p.add_argument("--meta-dir", type=Path, default=Path("data/processed/v2n_guitar/meta"))
     p.add_argument("--coverage", type=float, default=0.7)
     p.add_argument("--max-shots", type=int, default=5)
     p.add_argument("--min-shot-s", type=float, default=2.0)
     p.add_argument("--workers", type=int, default=8)
     p.add_argument("--limit", type=int, default=None)
     args = p.parse_args()
+    if args.round2:
+        round2(args.meta_dir, args.round2_min_s)
+        return
 
     with open(SPLIT) as f:
         rows = [r for r in csv.DictReader(f) if r["split"] in ("train", "val")]

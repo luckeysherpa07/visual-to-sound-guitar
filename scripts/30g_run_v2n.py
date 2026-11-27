@@ -7,6 +7,8 @@
     python scripts/30g_run_v2n.py --flip v --layout top                              # strip variant (CP10 re-check)
 
 Input:  <clips-dir>/strips/<clip>.npy (from 30f_make_v2n_strips.py / 31a_make_guifir_clips.py)
+Trained models (CP17): --config <run>/config.yaml --checkpoint <run>/best.safetensors --system v2n_ft_<X>
+(D on --strips <clips-dir>/strips_full).
 Variants (``v2n.transform_strips``): --flip none|h|v|hv, --layout mid|top, --norm (piano brightness/contrast).
 System name: v2n_zeroshot for the default (none, mid, no norm), else v2n_zeroshot_<flip>_<layout>[_norm]
 (e.g. v2n_zeroshot_v_top_norm), unless --system is given.
@@ -33,6 +35,9 @@ def main() -> None:
     p.add_argument("--clips-dir", type=Path, default=CLIPS)
     p.add_argument("--strips", type=Path, help="default: <clips-dir>/strips")
     p.add_argument("--checkpoint", type=Path, default=v2n.V2N_CKPT)
+    p.add_argument("--config", type=Path, default=None,
+                   help="CP17: merged config.yaml of a training run (model section); use with that run's "
+                        "--checkpoint <run>/best.safetensors and --system v2n_ft_<X>")
     p.add_argument("--flip", default="none", choices=v2n.FLIPS)
     p.add_argument("--layout", default="mid", choices=v2n.LAYOUTS)
     p.add_argument("--norm", action="store_true", help="match brightness/contrast to V2N's piano strips")
@@ -59,7 +64,7 @@ def main() -> None:
     out_probs = clips_dir / "v2n_probs" if system == "v2n_zeroshot" else clips_dir / "v2n_probs" / system
     out_probs.mkdir(parents=True, exist_ok=True)
 
-    model = v2n.V2NTranscriber(args.checkpoint)
+    model = v2n.V2NTranscriber(args.checkpoint, model_config=args.config)
     print(f"V2N {args.checkpoint.name} on {model.device}, repo {v2n.V2N_REPO}; {len(clips)} clips; "
           f"variant flip={args.flip} layout={args.layout} -> {system}")
     t0 = time.time()

@@ -39,14 +39,14 @@ generic ImageNet pretraining or seeing the picking hand help?
   frame per chosen shot → `data/interim/v2n_train/click_frames/<piece>__s<k>/f<frame>.png` + `shots.json`.
   Luckey clicks with `01b_annotate_corners.py` (`p` pastes for repeated camera angles; `s` skips shots without a
   usable fretboard view). Output: shot statistics (cuts per video, coverage), click count.
-- **17b — strips + labels.** Track each clicked shot with the CP5 tracker (whole shot, not 8 s), write both strip
+- **17b — strips + labels.** (Built Nov 27: the CP5 tracker drifts over whole shots, so the keyframe tracker `track_corners_keyframe` is used; uncovered stretches ≥ 10 s get a second click round `35a --round2`; see log.) Track each clicked shot (whole shot, not 8 s), write both strip
   versions (CP5 fretboard, CP12 full string) from the same tracking, valid runs ≥ 2 s → one V2N HDF5 record each
   (`<piece>_s<k>_r<j>`, JPEG q95). Labels = GAPS MIDI shifted by the measured per-piece sync lag
   (`baselines.clips.measure_sync`), cut to each record, as V2N TSV (onset, key_off, pedal_off, note, velocity
   dummy). Writer `src/guitar2midi/baselines/v2n_data.py`. Checks: label sheet (strip frames + roll for 3
   records), drift sheet (tracking over minutes, frames every ~30 s), hours kept per split. Disk: ~25 GB per strip
   version (107 GB free on Nov 27).
-- **17c — training wrapper + sanity.** `35c_train_v2n.py` (env `v2n`): Hydra cfg = V2N `oofv_1s` + our overrides
+- **17c — training wrapper + sanity.** (Built Nov 27: batch 8 × gradient accumulation 2 instead of 16, best checkpoint by val note onset F1; all checks passed, see log.) `35c_train_v2n.py` (env `v2n`): Hydra cfg = V2N `oofv_1s` + our overrides
   (`configs/model/v2n_guitar/`), optional piano init, calls V2N's trainer, run dir with merged config. Checks:
   unit test MIDI → TSV → `LinearLabeler` round trip and HDF5 readable by `VPTDataset`; load check (key count);
   overfit 1 record ~300 steps → train onset F1 near 100 %; generalised `V2NTranscriber` with the original config

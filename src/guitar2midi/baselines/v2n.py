@@ -83,13 +83,23 @@ def transform_strips(strips: np.ndarray, flip: str = "none", layout: str = "mid"
 
 
 class V2NTranscriber:
-    def __init__(self, checkpoint: Path = V2N_CKPT, device: str | None = None, batch_size: int = 2):
+    """V2N inference on our strips. Default = the released piano model (CP6). ``model_config`` = a CP17 run's
+    merged ``config.yaml`` (its ``model`` section, e.g. ``Transcriber_OnsetFrame``) with that run's
+    ``best.safetensors`` as ``checkpoint``; outputs then have no offset / velocity (decoder falls back)."""
+
+    def __init__(self, checkpoint: Path = V2N_CKPT, device: str | None = None, batch_size: int = 2,
+                 model_config: Path | None = None):
         import torch
         from omegaconf import OmegaConf
 
         v2n_predict, NoteDecoder = _import_v2n()
         self._v2n = v2n_predict
-        model_cfg = OmegaConf.load(V2N_REPO / "configs" / "oofv_1s" / "model" / "default.yaml")
+        if model_config is None:
+            model_cfg = OmegaConf.load(V2N_REPO / "configs" / "oofv_1s" / "model" / "default.yaml")
+        else:
+            model_cfg = OmegaConf.load(model_config).model
+            if "pretrained" in model_cfg.get("feature_extractor", {}):
+                model_cfg.feature_extractor.pretrained = False  # weights come from the checkpoint
         eval_cfg = OmegaConf.load(V2N_REPO / "configs" / "oofv_1s" / "eval" / "default.yaml")
         cfg = OmegaConf.create({"model": model_cfg})
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))

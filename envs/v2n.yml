@@ -29,8 +29,10 @@ dependencies:
       - pretty_midi
       - matplotlib
       - tqdm
-      # only imported (not used) by V2N's predict.py / data package:
-      - transformers>=4.40
+      # training (CP17, scripts/35c_train_v2n.py: V2N's train.py with HF Trainer):
+      - accelerate
+      # imported by V2N's predict.py / data package (and the trainer, CP17):
+      - transformers>=4.40,<5   # V2N's train.py uses TrainingArguments(warmup_ratio=...), removed in 5.x (CP17)
       - albumentations
       - librosa
       - soundfile

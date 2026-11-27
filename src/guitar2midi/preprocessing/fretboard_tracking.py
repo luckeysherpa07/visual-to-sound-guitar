@@ -21,7 +21,7 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-from guitar2midi.preprocessing.fretboard_grid import corners_valid
+from guitar2midi.preprocessing.fretboard_grid import BRIDGE_X, TEMPLATE_CORNERS, corners_valid
 
 STRIP_W, STRIP_H = 800, 144
 
@@ -87,6 +87,111 @@ def track_corners(frames: list[np.ndarray], ref_idx: int, ref_corners: np.ndarra
                     cur, tracked[t] = new, True
             corners[t] = cur
             prev = t
+    if smooth > 1:
+        corners = smooth_corners(corners, smooth)
+    return corners, tracked, inliers
+
+
+def guitar_quad(corners: np.ndarray, x0: float = -0.3, x1: float = BRIDGE_X) -> np.ndarray:
+    """Quad along the strings from ``x0`` to ``x1`` (template units: nut 0, fret 20 1, bridge BRIDGE_X; negative =
+    headstock side), same corner order as ``corners``. Covers headstock, neck and the body's string area."""
+    H = cv2.getPerspectiveTransform(TEMPLATE_CORNERS, np.asarray(corners, np.float32).reshape(4, 2))
+    src = np.float32([[x0, 0], [x0, 1], [x1, 0], [x1, 1]]).reshape(-1, 1, 2)
+    return cv2.perspectiveTransform(src, H).reshape(4, 2).astype(np.float64)
+
+
+def _neck_len(c: np.ndarray) -> float:
+    c = np.asarray(c).reshape(4, 2)
+    return 0.5 * (np.linalg.norm(c[2] - c[0]) + np.linalg.norm(c[3] - c[1]))
+
+
+def track_corners_keyframe(frames: list[np.ndarray], ref_idx: int, ref_corners: np.ndarray,
+                           min_inliers: int = 25, ratio: float = 0.75, max_jump: float = 0.08,
+                           max_gap: int = 5, smooth: int = 5, n_features: int = 1500,
+                           feature_dilate: float = 1.0, promote: float | None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Corners for every frame by matching each frame directly to the clicked (reference) frame (CP17).
+
+    Why not ``track_corners``: frame-to-frame flow adds up small errors; over minutes (whole GAPS shots) the
+    quad slides off the neck under a slow zoom, and dissolves / picture-in-picture inside a "shot" are followed
+    into other scenes. Here errors cannot accumulate, and frames that do not look like the reference view fail.
+
+    Per frame: SIFT features of the reference inside the guitar region (headstock -> bridge, dilated by one neck
+    width: neck + body are one rigid, nearly planar object), ratio-test matches to SIFT features of frame t near
+    the last accepted position (whole frame after a long loss), RANSAC homography (3 px). Accepted if >=
+    ``min_inliers`` inliers, the quad is convex, the neck length is 0.5-2x the reference, and (when the previous
+    frame was accepted) no corner jumps more than ``max_jump`` neck lengths. Rejected frames get NaN (not the last
+    good corners); gaps of <= ``max_gap`` frames between accepted frames are interpolated linearly (still
+    tracked = False), then a centred moving average over ``smooth`` frames.
+
+    Moving reference (``promote``): a slow zoom / camera move makes the clicked view match less and less (GAPS
+    027_Zpswc: guitar half the size 10 s after the click -> only 29 % of frames matched). When an accepted frame
+    has fewer than ``promote`` x the inliers of the first frame matched to the current reference, it becomes the
+    new reference (its own features, its tracked corners). **Off by default (None):** tested on 027_Zpswc it
+    reported 100 % tracked, but after the zoom the promoted references had picked up background features (guitar
+    wall) and the quad sat beside the guitar: confidently wrong. Uncovered parts get extra clicks instead (CP17).
+    ``feature_dilate``: reference features inside the guitar quad dilated by this many neck widths (less =
+    less background, fewer features).
+
+    Returns (corners (N, 4, 2), NaN where not accepted/interpolated; tracked (N,) bool; inliers (N,) int).
+    """
+    n = len(frames)
+    gray = [cv2.cvtColor(f, cv2.COLOR_BGR2GRAY) if f.ndim == 3 else f for f in frames]
+    ref = np.asarray(ref_corners, np.float64).reshape(4, 2)
+    sift = cv2.SIFT_create(nfeatures=n_features)
+
+    def features(g, c):
+        kp, des = sift.detectAndCompute(g, neck_mask(g.shape, guitar_quad(c), feature_dilate))
+        return (np.float32([k.pt for k in kp]) if kp else None), des
+
+    corners = np.full((n, 4, 2), np.nan)
+    tracked = np.zeros(n, bool)
+    inliers = np.zeros(n, int)
+    corners[ref_idx], tracked[ref_idx] = ref, True
+    pts0, des0 = features(gray[ref_idx], ref)
+    if des0 is None or len(des0) < min_inliers:
+        return corners, tracked, inliers
+    matcher = cv2.BFMatcher(cv2.NORM_L2)
+    for step, stop in ((1, n), (-1, -1)):
+        last, last_t = ref, ref_idx
+        pts_r, des_r, ref_c, base_k = pts0, des0, ref, None  # current reference (clicked frame at first)
+        ref_len = _neck_len(ref)
+        for t in range(ref_idx + step, stop, step):
+            near = abs(t - last_t) <= 25
+            mask = neck_mask(gray[t].shape, guitar_quad(last), 1.5) if near else None
+            kp, des = sift.detectAndCompute(gray[t], mask)
+            if des is None or len(kp) < min_inliers:
+                continue
+            good = [m[0] for m in matcher.knnMatch(des_r, des, k=2)
+                    if len(m) == 2 and m[0].distance < ratio * m[1].distance]
+            if len(good) < min_inliers:
+                inliers[t] = len(good)
+                continue
+            src = pts_r[[m.queryIdx for m in good]]
+            dst = np.float32([kp[m.trainIdx].pt for m in good])
+            H, inl = cv2.findHomography(src, dst, cv2.RANSAC, 3.0)
+            k = int(inl.sum()) if inl is not None else 0
+            inliers[t] = k
+            if H is None or k < min_inliers:
+                continue
+            new = cv2.perspectiveTransform(ref_c.reshape(-1, 1, 2), H).reshape(4, 2)
+            if not corners_valid(new) or not 0.5 < _neck_len(new) / ref_len < 2.0:
+                continue
+            if abs(t - last_t) == 1 and np.abs(new - last).max() > max_jump * _neck_len(last):
+                continue
+            corners[t], tracked[t] = new, True
+            last, last_t = new, t
+            if base_k is None:
+                base_k = k
+            elif promote is not None and k < promote * base_k:
+                p, d = features(gray[t], new)
+                if d is not None and len(d) >= 2 * min_inliers:
+                    pts_r, des_r, ref_c, base_k, ref_len = p, d, new, None, _neck_len(new)
+    # bridge short gaps between accepted frames
+    acc = np.flatnonzero(tracked)
+    for a, b in zip(acc[:-1], acc[1:]):
+        if 1 < b - a <= max_gap + 1:
+            w = (np.arange(a + 1, b) - a) / (b - a)
+            corners[a + 1:b] = corners[a] * (1 - w)[:, None, None] + corners[b] * w[:, None, None]
     if smooth > 1:
         corners = smooth_corners(corners, smooth)
     return corners, tracked, inliers

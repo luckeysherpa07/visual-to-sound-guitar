@@ -15,6 +15,7 @@ dependencies = [
     "mir_eval",
     "decorator",  # mir_eval needs it; pip skips it if ~/.local has a copy, which other envs can remove
     "pyyaml",
+    "h5py",  # CP17: V2N training data (HDF5 of JPEG strips)
 ]
 
 [project.optional-dependencies]

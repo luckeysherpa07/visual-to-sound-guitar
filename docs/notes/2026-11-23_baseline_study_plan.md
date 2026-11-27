@@ -197,20 +197,41 @@ shifts by one: CP16 LoRA (MMAudio, was CP15), CP17 V2N trained (was CP16), CP18 
 - Evaluated exactly like CP9 on all three test sets (generate → transcribe → evaluate), compared with MMAudio
   zero-shot. Question: does it learn the right notes, or only better guitar timbre?
 - Detailed plan (LoRA rank / target layers, steps, memory) written before starting, like the V2N plan.
+  Approved 2026-11-26: `2026-11-26_cp16_mmaudio_lora_plan.md` (rank 16, run A video + text, control run B video blanked).
+- Sub-steps (all done, results in `baseline_study_log.md`):
+  - **16a** (Nov 26): training windows + performer split (239 / 28 pieces) + MMAudio features of GAPS train (`34a`–`34c`).
+  - **16b** (Nov 26): own LoRA wrapper + 8-clip sanity run (`34d --sanity`).
+  - **16c** (Nov 26): runs A and B, val-loss comparison own / other / blank video (`34d`, `34f`).
+  - **16d** (Nov 27): generation with adapters, evaluation on all three sets vs zero-shot (`30c --lora`, `34g`).
+    Result: better val loss, same wrong notes ("learned the sound, not the notes").
 - **You see:** training curves, spectrograms before/after, rows per dataset.
 
 ### CP17 — V2N trained on guitar (full fine-tune, no LoRA) — was CP8, CP12, CP13, then CP16 (renumbered 2026-11-25 and 2026-11-26)
-- Strips for GAPS **train** split: click corners once per *video* (static cameras; ~200 clicks ≈ 1 h), flag videos
-  where the guitar moves (corner check at a few frames). No FPE needed.
-- Model: V2N with the 88-key heads + slope prior replaced by guitar pitch heads (onset + frame, ~E2–B5) and a
-  fretboard position encoding. Velocity head dropped.
+- **Plan approved 2026-11-27:** `2026-11-27_cp17_v2n_guitar_plan.md` (supersedes the details below and the Nov 24
+  draft where they differ).
+- Strips for GAPS **train + val** pieces (CP16 performer split, 239 / 28): many videos are multi-camera edits and the
+  tracker only works inside one shot, so corners are clicked on the **longest shots per video** until ≥ 70 % of
+  the video is covered, ≤ 5 shots, shots ≥ 2 s (Luckey, Nov 27; was: once per video) → 652 clicks (~2–3 h).
+  No FPE needed.
+- Model: V2N's own `Transcriber_OnsetFrame` (onset + frame heads, Conformer + BiLSTM), **88 outputs and slope prior
+  kept unchanged** (guitar MIDI 40–83 lies inside; lets the piano weights load without surgery; unused keys learn
+  "never on"). Offset + velocity heads dropped. A guitar-specific position prior stays for the own model.
 - Compare: runs A (piano init, full fine-tune), B (ConvNeXt-T ImageNet-22k), C (scratch), D (= A on full-string
   strips). **No LoRA on V2N** (decided 2026-11-25): V2N is small (ResNet-18 + conv blocks + BiLSTM, no attention)
   and fits in 16 GB, so LoRA saves nothing important and fits conv/LSTM layers poorly; LoRA is done on MMAudio (CP16).
 - Evaluate on the existing strips of all three baseline sets: GAPS test clips (main, real MIDI) and, as unseen
   cross-dataset tests, GuiFiR-Vid and magcil (pseudo-GT + GuiFiR tab recall); rows added to every block of the
   CP11 table. Training uses GAPS train only. Details: `2026-11-24_v2n_guitar_adaptation_plan.md` (updated 2026-11-24).
-- Code: `src/guitar2midi/model/` (V2N adaptation, reused later for the main model), `scripts/30h_finetune_v2n.py`.
+- Sub-steps (scripts numbered `35x`; V2N repo stays unmodified, our wrapper loads the piano weights):
+  - **17a** (done Nov 27): shots of the 267 videos (`35a`, `video.detect_cuts_file`) + frames to click; then
+    Luckey clicks → `data/labels/fretboard_corners/gaps_train.jsonl`.
+  - **17b**: track each clicked shot, both strip versions (fretboard + full string), GAPS MIDI (sync-shifted) →
+    V2N HDF5 + TSV (`35b`, `baselines/v2n_data.py`); label sheet + drift sheet.
+  - **17c**: training wrapper (`35c`, env `v2n`) + sanity: unit test, load check, overfit 1 record, CP6 outputs
+    reproduced by the generalised `V2NTranscriber`.
+  - **17d**: runs A → D → B → C (~20k steps, ~10 h each).
+  - **17e**: evaluation on all three sets (`30g --config --checkpoint`, `30e`, `31a`), seen / unseen GAPS
+    performers, rows in the `30i` table.
 - **You see:** training curves + table rows: zero-shot vs fine-tuned vs scratch.
 
 ### CP18 — Results table + summary, all systems (added 2026-11-25 as CP17, renumbered 2026-11-26)
@@ -229,4 +250,4 @@ After CP11: update CLAUDE.md and commit (the "how bad" result is ready for the s
 - Listen to generated clips before trusting the numbers.
 
 ## Rough effort
-CP1–CP2: ~half a day (mostly downloads). CP3: ~half a day. CP4: ~half a day. CP5: ~2 h + 15 min clicking. CP6: ~half a day. CP7 (GuiFiR prep): ~half a day. CP8 (magcil prep): ~half a day + ~15 min clicking. CP9/CP10: a few hours each. CP11: a few hours. CP12 (full-string strips): ~half a day. CP13 (V2A baselines): ~2–3 days incl. availability check. CP14 (Audeo): ~half a day. CP15 (Foley Music): ~1–2 days, time-boxed. CP16 (MMAudio LoRA): ~3–4 days. CP17 (V2N trained, was CP13/CP16): ~3–4 days (1 h clicking, model adaptation, training runs; + ~1 day for run D). CP18: a few hours.
+CP1–CP2: ~half a day (mostly downloads). CP3: ~half a day. CP4: ~half a day. CP5: ~2 h + 15 min clicking. CP6: ~half a day. CP7 (GuiFiR prep): ~half a day. CP8 (magcil prep): ~half a day + ~15 min clicking. CP9/CP10: a few hours each. CP11: a few hours. CP12 (full-string strips): ~half a day. CP13 (V2A baselines): ~2–3 days incl. availability check. CP14 (Audeo): ~half a day. CP15 (Foley Music): ~1–2 days, time-boxed. CP16 (MMAudio LoRA): ~3–4 days. CP17 (V2N trained, was CP13/CP16): ~3–4 days (~2–3 h clicking, data writer + wrapper, ~40 h of training runs A–D). CP18: a few hours.

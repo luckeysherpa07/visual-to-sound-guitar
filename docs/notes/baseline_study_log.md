@@ -1179,3 +1179,63 @@ add anything", so 16d evaluates both B variants.
 
 Code: `MMAudioGenerator(lora=…, no_video=…)` (adapters merged in fp32, then bf16), `30c --lora --tag --no-video`
 (systems `mmaudio_<tag>_{noprompt,prompt}`), `30c_plot_spectrograms --systems --suffix`.
+
+## CP16 step 16d — Evaluation of the LoRA models on all three sets (2026-11-27)
+
+Pipeline `outputs/logs/cp16_pipeline.sh` (log `outputs/logs/2026-11-27_cp16_pipeline.log`, 42 min): generate with
+`30c --lora … --tag` (seed 42, 25 steps, CFG 4.5, ± prompt "solo classical / acoustic / electric guitar") for
+- **A** = run A adapters, with video (`mmaudio_loraA_*`),
+- **B (+video)** = run B adapters (trained with the video blanked), generated *with* the video (`mmaudio_loraB_*`),
+- **B no video** = run B adapters, generated with the empty video, as trained (`mmaudio_loraBblank_*`),
+then `30d` → `30e` masked with the other-video control → GuiFiR tab recall; runs `2026-11-27_cp16_lora_{gaps,guifir,magcil}`.
+Paired comparisons and GAPS seen/unseen split: `scripts/34g_compare_lora_eval.py` →
+`outputs/runs/2026-11-27_cp16_lora_compare/summary.md`. Spectrograms: `<clips-dir>/examples/*__spectrograms_cp16.png`.
+
+Note F1@50 (no prompt / prompt), masked clips:
+
+| system | GAPS (74, real MIDI) | GuiFiR-Vid (32) | magcil (23) |
+|---|---|---|---|
+| MMAudio zero-shot | 3.1 / 3.0 | 2.7 / 2.8 | 5.9 / 6.6 |
+| + LoRA A | 3.2 / 3.3 | 3.2 / 3.6 | 6.1 / 6.1 |
+| + LoRA B (+video) | 3.3 / 3.3 | 2.2 / 2.7 | 6.0 / 6.6 |
+| + LoRA B no video | 0.0 / 2.5 | 0.0 / 3.1 | 0.0 / 0.0 |
+| chance (real audio of another piece) | 2.1 | 1.6 | 4.3 |
+| real audio (ceiling) | 93.6 | ref. | ref. |
+
+GuiFiR tab recall (no prompt / prompt): zero-shot 6.1 / 5.3, A 6.6 / 7.7, B (+video) 6.6 / 7.1, B no video
+0.0 / 18.3 (chance 3.0, reference 69.9).
+
+**Reading.**
+- **No gain in notes.** A vs zero-shot on GAPS: +0.1 / +0.3 points note F1, p = 0.78 / 0.69 (A better on only ~35 %
+  of clips); A vs B (+video) p ≥ 0.8; timing F1 unchanged (35.4 vs 35.5). All LoRA rows stay within ~1 point of
+  chance, like zero-shot. magcil: no change (p ≥ 0.28).
+- **Seen vs unseen GAPS performers** (12 of 27 test performers in GAPS train; 36 vs 38 clips): A 3.6 vs zero-shot 3.3
+  on seen (p = 0.87), 2.9 vs 2.9 on unseen. Chroma and frame F1 a bit higher on seen performers (chroma 0.237 vs
+  0.218, frame F1 12.9 vs 11.2, no prompt), not on unseen: at most a hint of "learned that player's sound", no notes.
+- **GuiFiR-Vid** is the only set with something: A beats zero-shot on timing F1 (31.7 vs 27.5, p = 0.014, no prompt)
+  and B (+video) on note F1 (3.2 vs 2.2, p = 0.04, no prompt only); tab recall 6.6 / 7.7 vs 6.1 / 5.3. Single tests
+  among many (~30 per set), effect ~1 note-F1 point, pseudo-GT: weak evidence at most; not on GAPS, where the
+  training data came from.
+- The other-video control: A is better with its own video than with another piece's on GAPS (note F1 3.2 vs 2.1,
+  p = 0.03; timing 35.4 vs 26.9) — as zero-shot MMAudio already was (3.1 vs 1.6). The LoRA did not add a
+  video → note link that zero-shot lacks.
+- **B no video** gives one fixed audio per prompt (same for every clip): without prompt it is silence (0 notes; with
+  neither video nor text the model was trained to output "nothing particular"), with "solo classical/acoustic
+  guitar" a dense strum (115 / 217 notes per clip), whose many notes give the high timing F1 / tab recall by
+  density alone; with "solo electric guitar" (magcil) silence again (B learned only classical GAPS audio for that
+  text). A prior, not a transcription: shown as the control row, not interpreted.
+- **Answer to the CP16 question** ("right notes, or only sounds more like a classical guitar?"): **only the sound.**
+  The validation loss improved (16c, three quarters of it also without video), the spectrograms look more like GAPS
+  recordings, but the notes in the generated audio are as wrong as before. The flow-matching loss rewards matching
+  timbre/room/loudness over the whole 8 s, and 12.5 h of video is far too little to learn finger → pitch through
+  CLIP (8 fps, 384² whole frame) and Synchformer (224² centre crop) features that barely resolve the fretboard.
+- Spectrograms (`019_Vpswc_c1`, `027_Zpswc_c1`, …): A/B look like plucked guitar with the zero-shot timing; pitches
+  do not follow the GT notes.
+
+**Results table** (`30i`): rows "MMAudio + LoRA A (video)", "+ LoRA A (+ prompt)", "+ LoRA B (+ prompt)",
+"+ LoRA B, no video" in every block (merged from the cp16 runs). Side effect: the cp16 runs also scored
+"MMAudio (+ prompt)" against another piece's video, so that row now has the significance test too (caption note
+"not tested" removed): MMAudio + prompt is better with its own video on GAPS (note F1, timing, onset r), GuiFiR
+(note F1 2.8 vs 1.2, p = 0.014) and magcil (6.6 vs 2.7, p = 0.02); MMAudio without prompt on GuiFiR / magcil stays
+n.s. Small effects at chance level, but the earlier wording "beats a mismatched video only on GAPS" holds for the
+no-prompt row only.
